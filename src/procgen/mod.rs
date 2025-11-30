@@ -1,0 +1,255 @@
+use anyhow::Error;
+use image::{DynamicImage, GenericImage, ImageBuffer, Rgb};
+use rand::prelude::*;
+
+use crate::procgen::types::{Tile, Tileset};
+
+pub use parse::parse_tileset_xml;
+
+mod parse;
+mod types;
+
+#[derive(Debug)]
+pub enum WaveTile {
+    Observed(usize),
+    Unobserved(Vec<bool>),
+}
+
+impl WaveTile {
+    fn num_possible_options(&self) -> usize {
+        match self {
+            Self::Observed(_) => 999999,
+            Self::Unobserved(possibilities) => {
+                possibilities.iter().map(|b| if *b { 1 } else { 0 }).sum()
+            }
+        }
+    }
+
+    fn possible_options(&self) -> Vec<usize> {
+        match self {
+            Self::Observed(i) => vec![*i],
+            Self::Unobserved(possibilities) => possibilities
+                .iter()
+                .enumerate()
+                .filter_map(|(i, b)| if *b { Some(i) } else { None })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Wave {
+    pub tiles: Vec<WaveTile>,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Wave {
+    fn get(&self, x: usize, y: usize) -> &WaveTile {
+        self.tiles
+            .get(y * self.width + x)
+            .expect("out of bounds access")
+    }
+
+    fn get_mut(&mut self, x: usize, y: usize) -> &mut WaveTile {
+        self.tiles
+            .get_mut(y * self.width + x)
+            .expect("out of bounds access")
+    }
+}
+
+pub struct WaveFunctionCollapse {
+    tileset: Tileset,
+    pub wave: Wave,
+    rng: StdRng,
+}
+
+impl WaveFunctionCollapse {
+    pub fn new(tileset: Tileset, width: usize, height: usize, seed: u64) -> Self {
+        // populate WaveSlots in Unobserved state
+        let mut superposition = Vec::new();
+        for _ in 0..(tileset.tile_names.len() * 4) {
+            superposition.push(true);
+        }
+
+        let mut tiles = Vec::new();
+        for _ in 0..(width * height) {
+            tiles.push(WaveTile::Unobserved(superposition.clone()));
+        }
+
+        let rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+        WaveFunctionCollapse {
+            tileset,
+            wave: Wave {
+                tiles,
+                width,
+                height,
+            },
+            rng,
+        }
+    }
+
+    pub fn step(&mut self) -> Result<(), Error> {
+        // find lowest entropy tile
+        let mut lowest_possibilities = self.tileset.tile_names.len() * 4;
+        let mut xy = vec![(0, 0)];
+        for y in 0..(self.wave.height) {
+            for x in 0..(self.wave.width) {
+                let possibilities = self.wave.get(x, y).num_possible_options();
+                if possibilities < lowest_possibilities {
+                    lowest_possibilities = possibilities;
+                    xy = vec![(x, y)];
+                } else if possibilities == lowest_possibilities {
+                    xy.push((x, y));
+                }
+            }
+        }
+
+        let xy = *xy
+            .choose(&mut self.rng)
+            .ok_or(anyhow::anyhow!("All steps taken"))?;
+
+        // collapse lowest entropy tile
+        let observation = {
+            let tile = self.wave.get(xy.0, xy.1);
+            *tile
+                .possible_options()
+                .choose(&mut self.rng)
+                .ok_or(anyhow::anyhow!(
+                    "lowest entropy WaveSlot had 0 possible options"
+                ))?
+        };
+        let (x, y) = xy;
+        *self.wave.get_mut(x, y) = WaveTile::Observed(observation);
+
+        // propagate
+        let center = self.wave.get(x, y);
+        let children = self.get_children(x, y);
+        let center_possible_options = center.possible_options();
+
+        for ((child_x, child_y), side) in children {
+            let child = self.wave.get(child_x, child_y);
+            let disallowed_options = match child {
+                WaveTile::Unobserved(_) => {
+                    let mut disallowed_options = Vec::new();
+                    for center_possible_option in center_possible_options.iter() {
+                        let center_tile = self.index_to_tile(*center_possible_option);
+                        for child_possible_option in child.possible_options() {
+                            let child_tile = self.index_to_tile(child_possible_option);
+                            if !self.is_allowed(&center_tile, &child_tile, side) {
+                                disallowed_options.push(child_possible_option);
+                            }
+                        }
+                    }
+                    disallowed_options
+                }
+                WaveTile::Observed(_) => Vec::new(),
+            };
+
+            if let WaveTile::Unobserved(items) = self.wave.get_mut(child_x, child_y) {
+                for option in disallowed_options {
+                    items[option] = false;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_children(&self, x: usize, y: usize) -> Vec<((usize, usize), u8)> {
+        let mut children = Vec::new();
+        if y > 0 {
+            children.push(((x, y - 1), 0));
+        }
+        if x > 0 {
+            children.push(((x - 1, y), 1));
+        }
+        if y < self.wave.height - 1 {
+            children.push(((x, y + 1), 2));
+        }
+        if x < self.wave.width - 1 {
+            children.push(((x + 1, y), 3));
+        }
+
+        children
+    }
+
+    fn is_allowed(&self, tile_one: &Tile, tile_two: &Tile, side: u8) -> bool {
+        let side_one = (side + (4 - tile_one.rotation)) % 4;
+        let side_two = (side + 2 + (4 - tile_two.rotation)) % 4;
+
+        for neighbor in &self.tileset.neighbors {
+            if neighbor.tile_one == tile_one.name && neighbor.tile_two == tile_two.name {
+                if neighbor.sides_one.contains(&side_one) && neighbor.sides_two.contains(&side_two)
+                {
+                    return true;
+                }
+            } else if neighbor.tile_two == tile_one.name && neighbor.tile_one == tile_two.name {
+                if neighbor.sides_two.contains(&side_one) && neighbor.sides_one.contains(&side_two)
+                {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn index_to_tile(&self, index: usize) -> Tile {
+        let base_index = index / 4;
+        let rotation = index % 4;
+        Tile {
+            name: self
+                .tileset
+                .tile_names
+                .get(base_index)
+                .expect("index out of bounds")
+                .clone(),
+            rotation: rotation.try_into().unwrap(),
+        }
+    }
+
+    /// renders current wave to texture/image
+    pub fn render(&self) -> Result<DynamicImage, Error> {
+        let width = self.wave.width * self.tileset.tile_size;
+        let height = self.wave.height * self.tileset.tile_size;
+
+        let mut img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+            ImageBuffer::new(width.try_into().unwrap(), height.try_into().unwrap());
+
+        for x in 0..self.wave.width {
+            for y in 0..self.wave.height {
+                let wave_slot = self.wave.get(x, y);
+                match wave_slot {
+                    WaveTile::Observed(tile_idx) => {
+                        let tile = self.index_to_tile(*tile_idx);
+                        let base_img = &self
+                            .tileset
+                            .tiles
+                            .get(&tile.name)
+                            .expect("tile not found")
+                            .img;
+                        let rotated_img = match tile.rotation {
+                            0 => base_img.clone(),
+                            1 => base_img.rotate270(),
+                            2 => base_img.rotate180(),
+                            3 => base_img.rotate90(),
+                            _ => base_img.clone(),
+                        };
+
+                        let tile_img = rotated_img.to_rgb8();
+
+                        let px = (x * self.tileset.tile_size) as u32;
+                        let py = (y * self.tileset.tile_size) as u32;
+
+                        img.copy_from(&tile_img, px, py)?;
+                    }
+                    WaveTile::Unobserved(_) => (),
+                }
+            }
+        }
+
+        Ok(DynamicImage::from(img))
+    }
+}
