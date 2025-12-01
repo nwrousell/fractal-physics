@@ -8,6 +8,7 @@ pub enum Symmetry {
     L,
     I,
     T,
+    Slash,
 }
 
 impl Symmetry {
@@ -18,6 +19,8 @@ impl Symmetry {
             "L" => Ok(Symmetry::L),
             "I" => Ok(Symmetry::I),
             "T" => Ok(Symmetry::T),
+            "\\" => Ok(Symmetry::Slash),
+            "F" => Ok(Symmetry::None),
             _ => bail!("Unknown symmetry: {}", s),
         }
     }
@@ -47,6 +50,13 @@ impl Symmetry {
                     vec![side]
                 }
             }
+            Symmetry::Slash => {
+                if side == 0 || side == 1 {
+                    vec![0, 1]
+                } else {
+                    vec![2, 3]
+                }
+            }
         }
     }
 }
@@ -57,24 +67,25 @@ pub struct BaseTile {
     pub symmetry: Symmetry,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Tile {
-    pub name: String,
+    pub base_tile_idx: usize,
     pub rotation: u8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Neighbor {
-    pub tile_one: String,
-    pub sides_one: Vec<u8>,
-    pub tile_two: String,
-    pub sides_two: Vec<u8>,
+    pub tile_one_idx: usize,
+    pub side_one: u8,
+    pub tile_two_idx: usize,
+    pub side_two: u8,
 }
 
 #[derive(Debug)]
 pub struct Tileset {
     pub tiles: HashMap<String, BaseTile>,
     pub tile_names: Vec<String>,
-    pub neighbors: Vec<Neighbor>,
     pub tile_size: usize,
+    pub allowed_neighbors: Vec<[Vec<bool>; 4]>,
+    pub tile_weights: Vec<f32>,
 }

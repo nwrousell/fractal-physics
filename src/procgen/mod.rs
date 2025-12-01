@@ -1,3 +1,5 @@
+use std::collections::{HashSet, VecDeque};
+
 use anyhow::Error;
 use image::{DynamicImage, GenericImage, ImageBuffer, Rgb};
 use rand::prelude::*;
@@ -25,6 +27,7 @@ impl WaveTile {
         }
     }
 
+    #[inline]
     fn possible_options(&self) -> Vec<usize> {
         match self {
             Self::Observed(i) => vec![*i],
@@ -110,46 +113,69 @@ impl WaveFunctionCollapse {
             .choose(&mut self.rng)
             .ok_or(anyhow::anyhow!("All steps taken"))?;
 
-        // collapse lowest entropy tile
+        // collapse lowest entropy tile with weighted choice
         let observation = {
             let tile = self.wave.get(xy.0, xy.1);
-            *tile
-                .possible_options()
-                .choose(&mut self.rng)
-                .ok_or(anyhow::anyhow!(
-                    "lowest entropy WaveSlot had 0 possible options"
-                ))?
+            let possible_options = tile.possible_options();
+
+            // Use weighted choice based on base tile weights
+            *possible_options
+                .choose_weighted(&mut self.rng, |&idx| {
+                    let base_idx = idx / 4;
+                    self.tileset.tile_weights[base_idx]
+                })
+                .map_err(|e| anyhow::anyhow!("Failed weighted choice: {}", e))?
         };
         let (x, y) = xy;
         *self.wave.get_mut(x, y) = WaveTile::Observed(observation);
 
         // propagate
-        let center = self.wave.get(x, y);
-        let children = self.get_children(x, y);
-        let center_possible_options = center.possible_options();
+        let mut propagation_queue = VecDeque::new();
+        propagation_queue.push_back((x, y));
+        let mut visited = HashSet::new();
 
-        for ((child_x, child_y), side) in children {
-            let child = self.wave.get(child_x, child_y);
-            let disallowed_options = match child {
-                WaveTile::Unobserved(_) => {
-                    let mut disallowed_options = Vec::new();
-                    for center_possible_option in center_possible_options.iter() {
-                        let center_tile = self.index_to_tile(*center_possible_option);
-                        for child_possible_option in child.possible_options() {
-                            let child_tile = self.index_to_tile(child_possible_option);
-                            if !self.is_allowed(&center_tile, &child_tile, side) {
-                                disallowed_options.push(child_possible_option);
+        while let Some((x, y)) = propagation_queue.pop_front() {
+            if visited.contains(&(x, y)) {
+                continue;
+            } else {
+                visited.insert((x, y));
+            }
+
+            let center = self.wave.get(x, y);
+            let children = self.get_children(x, y);
+            let center_possible_options = center.possible_options();
+
+            for ((child_x, child_y), side) in children {
+                let child = self.wave.get(child_x, child_y);
+                let disallowed_options = match child {
+                    WaveTile::Unobserved(_) => {
+                        let child_possible = child.possible_options();
+                        let mut disallowed = Vec::new();
+
+                        // For each child option, check if ANY center option allows it
+                        'child_loop: for &child_opt in &child_possible {
+                            for &center_opt in center_possible_options.iter() {
+                                if self.is_allowed(center_opt, child_opt, side) {
+                                    continue 'child_loop;
+                                }
                             }
+                            // No center tile allows this child tile - it's disallowed
+                            disallowed.push(child_opt);
                         }
-                    }
-                    disallowed_options
-                }
-                WaveTile::Observed(_) => Vec::new(),
-            };
 
-            if let WaveTile::Unobserved(items) = self.wave.get_mut(child_x, child_y) {
-                for option in disallowed_options {
-                    items[option] = false;
+                        disallowed
+                    }
+                    WaveTile::Observed(_) => Vec::new(),
+                };
+
+                if let WaveTile::Unobserved(items) = self.wave.get_mut(child_x, child_y) {
+                    for option in disallowed_options {
+                        items[option] = false;
+                    }
+
+                    if !visited.contains(&(child_x, child_y)) {
+                        propagation_queue.push_back((child_x, child_y));
+                    }
                 }
             }
         }
@@ -157,6 +183,7 @@ impl WaveFunctionCollapse {
         Ok(())
     }
 
+    #[inline]
     fn get_children(&self, x: usize, y: usize) -> Vec<((usize, usize), u8)> {
         let mut children = Vec::new();
         if y > 0 {
@@ -175,37 +202,16 @@ impl WaveFunctionCollapse {
         children
     }
 
-    fn is_allowed(&self, tile_one: &Tile, tile_two: &Tile, side: u8) -> bool {
-        let side_one = (side + (4 - tile_one.rotation)) % 4;
-        let side_two = (side + 2 + (4 - tile_two.rotation)) % 4;
-
-        for neighbor in &self.tileset.neighbors {
-            if neighbor.tile_one == tile_one.name && neighbor.tile_two == tile_two.name {
-                if neighbor.sides_one.contains(&side_one) && neighbor.sides_two.contains(&side_two)
-                {
-                    return true;
-                }
-            } else if neighbor.tile_two == tile_one.name && neighbor.tile_one == tile_two.name {
-                if neighbor.sides_two.contains(&side_one) && neighbor.sides_one.contains(&side_two)
-                {
-                    return true;
-                }
-            }
-        }
-
-        false
+    #[inline]
+    fn is_allowed(&self, tile_one_idx: usize, tile_two_idx: usize, side: u8) -> bool {
+        self.tileset.allowed_neighbors[tile_one_idx][side as usize][tile_two_idx]
     }
 
     fn index_to_tile(&self, index: usize) -> Tile {
         let base_index = index / 4;
         let rotation = index % 4;
         Tile {
-            name: self
-                .tileset
-                .tile_names
-                .get(base_index)
-                .expect("index out of bounds")
-                .clone(),
+            base_tile_idx: base_index,
             rotation: rotation.try_into().unwrap(),
         }
     }
@@ -224,10 +230,11 @@ impl WaveFunctionCollapse {
                 match wave_slot {
                     WaveTile::Observed(tile_idx) => {
                         let tile = self.index_to_tile(*tile_idx);
+                        let tile_name = &self.tileset.tile_names[tile.base_tile_idx];
                         let base_img = &self
                             .tileset
                             .tiles
-                            .get(&tile.name)
+                            .get(tile_name)
                             .expect("tile not found")
                             .img;
                         let rotated_img = match tile.rotation {

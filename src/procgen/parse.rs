@@ -1,7 +1,7 @@
 use crate::procgen::types::{BaseTile, Neighbor, Symmetry, Tileset};
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -23,6 +23,12 @@ struct TileDef {
     name: String,
     #[serde(rename = "@symmetry")]
     symmetry: String,
+    #[serde(rename = "@weight", default = "default_weight")]
+    weight: f32,
+}
+
+fn default_weight() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,7 +77,9 @@ pub fn parse_tileset_xml<P: AsRef<Path>>(xml_path: P) -> Result<Tileset> {
     // Load tile images
     let mut tiles = HashMap::new();
     let mut tile_names = Vec::new();
-    for tile_def in &def.tiles.tiles {
+    let mut tile_weights = Vec::new();
+    let mut name_to_index = HashMap::new();
+    for (idx, tile_def) in def.tiles.tiles.iter().enumerate() {
         let tile_path = base_dir.join(format!("{}.png", tile_def.name));
         let img = image::open(&tile_path)
             .with_context(|| format!("Failed to load tile image: {}", tile_path.display()))?;
@@ -79,13 +87,22 @@ pub fn parse_tileset_xml<P: AsRef<Path>>(xml_path: P) -> Result<Tileset> {
         let symmetry = Symmetry::from_str(&tile_def.symmetry)?;
         tiles.insert(tile_def.name.clone(), BaseTile { img, symmetry });
         tile_names.push(tile_def.name.clone());
+        tile_weights.push(tile_def.weight);
+        name_to_index.insert(tile_def.name.as_str(), idx);
     }
 
     // Parse neighbors
-    let mut neighbors = Vec::new();
+    let mut neighbors = HashSet::new();
     for neighbor_def in &def.neighbors.neighbors {
         let (name_a, rot_a) = parse_tile_ref(&neighbor_def.left);
         let (name_b, rot_b) = parse_tile_ref(&neighbor_def.right);
+
+        let idx_a = *name_to_index
+            .get(name_a)
+            .expect("neighbor references unknown tile");
+        let idx_b = *name_to_index
+            .get(name_b)
+            .expect("neighbor references unknown tile");
 
         let symmetry_a = tiles
             .get(name_a)
@@ -99,20 +116,68 @@ pub fn parse_tileset_xml<P: AsRef<Path>>(xml_path: P) -> Result<Tileset> {
         let sides_a = symmetry_a.symmetric_sides((3 + (4 - rot_a)) % 4);
         let sides_b = symmetry_b.symmetric_sides((1 + (4 - rot_b)) % 4);
 
-        neighbors.push(Neighbor {
-            tile_one: name_a.to_string(),
-            sides_one: sides_a,
-            tile_two: name_b.to_string(),
-            sides_two: sides_b,
-        });
+        // Expand into individual side-to-side neighbors
+        for &side_a in &sides_a {
+            for &side_b in &sides_b {
+                neighbors.insert(Neighbor {
+                    tile_one_idx: idx_a,
+                    side_one: side_a,
+                    tile_two_idx: idx_b,
+                    side_two: side_b,
+                });
+            }
+        }
     }
 
     let tile_size = tiles.get(tile_names.first().unwrap()).unwrap().img.width() as usize;
 
+    // Pre-compute allowed neighbors
+    let num_tiles = tile_names.len();
+    let num_rotated_tiles = num_tiles * 4;
+    let mut allowed_neighbors = Vec::with_capacity(num_rotated_tiles);
+
+    for _ in 0..num_rotated_tiles {
+        allowed_neighbors.push([
+            vec![false; num_rotated_tiles],
+            vec![false; num_rotated_tiles],
+            vec![false; num_rotated_tiles],
+            vec![false; num_rotated_tiles],
+        ]);
+    }
+
+    // For each neighbor relationship, mark all compatible rotations
+    for neighbor in &neighbors {
+        // Try all rotation combinations
+        for rot_one in 0..4u8 {
+            for rot_two in 0..4u8 {
+                let tile_one_idx = neighbor.tile_one_idx * 4 + rot_one as usize;
+                let tile_two_idx = neighbor.tile_two_idx * 4 + rot_two as usize;
+
+                for side in 0..4u8 {
+                    let side_one = (side + (4 - rot_one)) % 4;
+                    let side_two = (side + 2 + (4 - rot_two)) % 4;
+
+                    if neighbor.side_one == side_one && neighbor.side_two == side_two {
+                        allowed_neighbors[tile_one_idx][side as usize][tile_two_idx] = true;
+                    }
+
+                    // Also check the other way
+                    let side_one_rev = (side + (4 - rot_two)) % 4;
+                    let side_two_rev = (side + 2 + (4 - rot_one)) % 4;
+
+                    if neighbor.side_two == side_one_rev && neighbor.side_one == side_two_rev {
+                        allowed_neighbors[tile_two_idx][side as usize][tile_one_idx] = true;
+                    }
+                }
+            }
+        }
+    }
+
     Ok(Tileset {
         tiles,
         tile_names,
-        neighbors,
         tile_size,
+        allowed_neighbors,
+        tile_weights,
     })
 }
