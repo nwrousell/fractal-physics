@@ -60,7 +60,7 @@ var<uniform> light: Light;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // return textureSample(t_diffuse, s_diffuse, in.tex_coords);
-    let object_color = vec4<f32>(0.3, 0.3, 0.3, 1.0);
+    let object_color = vec4<f32>(0.1, 0.1, 0.1, 1.0);
 
     // ambient
     let ambient_strength = 0.2;

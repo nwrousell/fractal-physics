@@ -1,12 +1,11 @@
-use crate::procgen::{WaveFunctionCollapse, parse_tileset_xml};
 use anyhow::Error;
-use placeholder_name::run;
-use rand::{Rng, rng};
-
-mod procgen;
+use placeholder_name::{generate, run};
 
 fn main() -> Result<(), Error> {
-    run().unwrap();
+    run()?;
+    // generate();
+
+    // run().unwrap();
     // let seed: u64 = rng().random();
     // let tileset = parse_tileset_xml("src/procgen/tilemaps/Rooms/tileset.xml")?;
     // // println!("{:#?}", tileset);

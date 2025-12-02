@@ -61,6 +61,8 @@ pub struct CameraController {
     pub is_backward_pressed: bool,
     pub is_left_pressed: bool,
     pub is_right_pressed: bool,
+    pub is_up_pressed: bool,
+    pub is_down_pressed: bool,
 }
 
 impl CameraController {
@@ -71,6 +73,8 @@ impl CameraController {
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
+            is_up_pressed: false,
+            is_down_pressed: false,
         }
     }
 
@@ -92,6 +96,14 @@ impl CameraController {
                 self.is_right_pressed = is_pressed;
                 true
             }
+            KeyCode::Space => {
+                self.is_up_pressed = is_pressed;
+                true
+            }
+            KeyCode::ControlLeft | KeyCode::ControlRight => {
+                self.is_down_pressed = is_pressed;
+                true
+            }
             _ => false,
         }
     }
@@ -102,29 +114,37 @@ impl CameraController {
         let forward_norm = forward.normalize();
         let forward_mag = forward.magnitude();
 
-        // Prevents glitching when the camera gets too close to the
-        // center of the scene.
+        // Forward/backward movement
         if self.is_forward_pressed && forward_mag > self.speed {
             camera.eye += forward_norm * self.speed;
+            camera.target += forward_norm * self.speed;
         }
         if self.is_backward_pressed {
             camera.eye -= forward_norm * self.speed;
+            camera.target -= forward_norm * self.speed;
         }
 
-        let right = forward_norm.cross(camera.up);
+        // Calculate right vector for lateral movement
+        let right = forward_norm.cross(camera.up).normalize();
 
-        // Redo radius calc in case the forward/backward is pressed.
-        let forward = camera.target - camera.eye;
-        let forward_mag = forward.magnitude();
-
+        // Left/right lateral movement
         if self.is_right_pressed {
-            // Rescale the distance between the target and the eye so
-            // that it doesn't change. The eye, therefore, still
-            // lies on the circle made by the target and eye.
-            camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
+            camera.eye += right * self.speed;
+            camera.target += right * self.speed;
         }
         if self.is_left_pressed {
-            camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
+            camera.eye -= right * self.speed;
+            camera.target -= right * self.speed;
+        }
+
+        // Up/down movement along the up vector
+        if self.is_up_pressed {
+            camera.eye += camera.up * self.speed;
+            camera.target += camera.up * self.speed;
+        }
+        if self.is_down_pressed {
+            camera.eye -= camera.up * self.speed;
+            camera.target -= camera.up * self.speed;
         }
     }
 }

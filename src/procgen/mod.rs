@@ -1,262 +1,207 @@
-use std::collections::{HashSet, VecDeque};
+use std::path::Path;
+
+use crate::scene::RectangularPrism;
 
 use anyhow::Error;
-use image::{DynamicImage, GenericImage, ImageBuffer, Rgb};
-use rand::prelude::*;
-
-use crate::procgen::types::{Tile, Tileset};
-
-pub use parse::parse_tileset_xml;
+use cgmath::Point3;
+use image::{DynamicImage, GenericImageView};
 
 mod parse;
 mod types;
+mod wfc;
 
-#[derive(Debug)]
-pub enum WaveTile {
-    Observed(usize),
-    Unobserved(Vec<bool>),
+struct Bitmap {
+    bits: Vec<bool>,
+    width: usize,
+    height: usize,
 }
 
-impl WaveTile {
-    fn num_possible_options(&self) -> usize {
-        match self {
-            Self::Observed(_) => 999999,
-            Self::Unobserved(possibilities) => {
-                possibilities.iter().map(|b| if *b { 1 } else { 0 }).sum()
-            }
-        }
-    }
-
-    #[inline]
-    fn possible_options(&self) -> Vec<usize> {
-        match self {
-            Self::Observed(i) => vec![*i],
-            Self::Unobserved(possibilities) => possibilities
-                .iter()
-                .enumerate()
-                .filter_map(|(i, b)| if *b { Some(i) } else { None })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Wave {
-    pub tiles: Vec<WaveTile>,
-    pub width: usize,
-    pub height: usize,
-}
-
-impl Wave {
-    fn get(&self, x: usize, y: usize) -> &WaveTile {
-        self.tiles
-            .get(y * self.width + x)
-            .expect("out of bounds access")
-    }
-
-    fn get_mut(&mut self, x: usize, y: usize) -> &mut WaveTile {
-        self.tiles
-            .get_mut(y * self.width + x)
-            .expect("out of bounds access")
-    }
-}
-
-pub struct WaveFunctionCollapse {
-    tileset: Tileset,
-    pub wave: Wave,
-    rng: StdRng,
-}
-
-impl WaveFunctionCollapse {
-    pub fn new(tileset: Tileset, width: usize, height: usize, seed: u64) -> Self {
-        // populate WaveSlots in Unobserved state
-        let mut superposition = Vec::new();
-        for _ in 0..(tileset.tile_names.len() * 4) {
-            superposition.push(true);
-        }
-
-        let mut tiles = Vec::new();
-        for _ in 0..(width * height) {
-            tiles.push(WaveTile::Unobserved(superposition.clone()));
-        }
-
-        let rng = rand::rngs::StdRng::seed_from_u64(seed);
-
-        WaveFunctionCollapse {
-            tileset,
-            wave: Wave {
-                tiles,
-                width,
-                height,
-            },
-            rng,
-        }
-    }
-
-    pub fn step(&mut self) -> Result<(), Error> {
-        // find lowest entropy tile
-        let mut lowest_possibilities = self.tileset.tile_names.len() * 4;
-        let mut xy = vec![(0, 0)];
-        for y in 0..(self.wave.height) {
-            for x in 0..(self.wave.width) {
-                let possibilities = self.wave.get(x, y).num_possible_options();
-                if possibilities < lowest_possibilities {
-                    lowest_possibilities = possibilities;
-                    xy = vec![(x, y)];
-                } else if possibilities == lowest_possibilities {
-                    xy.push((x, y));
-                }
+impl Bitmap {
+    fn from_image(img: DynamicImage) -> Self {
+        let mut bits = Vec::new();
+        for y in 0..img.height() {
+            for x in 0..img.width() {
+                let is_black = img
+                    .get_pixel(x, y)
+                    .0
+                    .iter()
+                    .enumerate()
+                    .any(|(i, c)| i < 3 && *c < 100);
+                bits.push(is_black);
             }
         }
 
-        let xy = *xy
-            .choose(&mut self.rng)
-            .ok_or(anyhow::anyhow!("All steps taken"))?;
+        Self {
+            bits,
+            width: img.width() as usize,
+            height: img.height() as usize,
+        }
+    }
 
-        // collapse lowest entropy tile with weighted choice
-        let observation = {
-            let tile = self.wave.get(xy.0, xy.1);
-            let possible_options = tile.possible_options();
+    fn get(&self, x: usize, y: usize) -> bool {
+        self.bits[y * self.width + x]
+    }
 
-            // Use weighted choice based on base tile weights
-            *possible_options
-                .choose_weighted(&mut self.rng, |&idx| {
-                    let base_idx = idx / 4;
-                    self.tileset.tile_weights[base_idx]
-                })
-                .map_err(|e| anyhow::anyhow!("Failed weighted choice: {}", e))?
-        };
-        let (x, y) = xy;
-        *self.wave.get_mut(x, y) = WaveTile::Observed(observation);
-
-        // propagate
-        let mut propagation_queue = VecDeque::new();
-        propagation_queue.push_back((x, y));
-        let mut visited = HashSet::new();
-
-        while let Some((x, y)) = propagation_queue.pop_front() {
-            if visited.contains(&(x, y)) {
-                continue;
+    fn next(&self, x: usize, y: usize) -> Option<(usize, usize)> {
+        if x < self.width - 1 {
+            Some((x + 1, y))
+        } else {
+            if y < self.height - 1 {
+                Some((0, y + 1))
             } else {
-                visited.insert((x, y));
+                None
             }
+        }
+    }
 
-            let center = self.wave.get(x, y);
-            let children = self.get_children(x, y);
-            let center_possible_options = center.possible_options();
+    fn first_black(&self, x: usize, y: usize) -> Option<(usize, usize)> {
+        let mut x = x;
+        let mut y = y;
 
-            for ((child_x, child_y), side) in children {
-                let child = self.wave.get(child_x, child_y);
-                let disallowed_options = match child {
-                    WaveTile::Unobserved(_) => {
-                        let child_possible = child.possible_options();
-                        let mut disallowed = Vec::new();
+        loop {
+            let is_black = self.get(x, y);
+            if is_black {
+                return Some((x, y));
+            } else {
+                match self.next(x, y) {
+                    Some((next_x, next_y)) => {
+                        x = next_x;
+                        y = next_y;
+                    }
+                    None => {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
 
-                        // For each child option, check if ANY center option allows it
-                        'child_loop: for &child_opt in &child_possible {
-                            for &center_opt in center_possible_options.iter() {
-                                if self.is_allowed(center_opt, child_opt, side) {
-                                    continue 'child_loop;
-                                }
-                            }
-                            // No center tile allows this child tile - it's disallowed
-                            disallowed.push(child_opt);
+    fn white_or_end(&self, x: usize, y: usize) -> Option<(usize, usize)> {
+        let mut x = x;
+        let mut y = y;
+        loop {
+            let is_black = self.get(x, y);
+            let is_last_in_row = x == self.width - 1;
+            if !is_black || is_last_in_row {
+                return Some((x, y));
+            } else {
+                match self.next(x, y) {
+                    Some((next_x, next_y)) => {
+                        x = next_x;
+                        y = next_y;
+                    }
+                    None => {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
+    fn bottom(&self, left: usize, right: usize, top: usize) -> usize {
+        let mut y = top + 1;
+        loop {
+            if y == self.height {
+                return y - 1;
+            }
+            let row = &self.bits[(y * self.width + left)..(y * self.width + right)]; // ! here
+            let all_black = row.iter().all(|b| *b);
+            if all_black {
+                y = y + 1;
+            } else {
+                return y - 1;
+            }
+        }
+    }
+}
+
+fn bitmap_to_rects(bitmap: Bitmap) -> Vec<RectangularPrism> {
+    let mut rects: Vec<RectangularPrism> = Vec::new();
+
+    let mut x = 0;
+    let mut y = 0;
+
+    loop {
+        let top_left = loop {
+            match bitmap.first_black(x, y) {
+                Some((first_x, first_y)) => {
+                    // check if tl is included in rects
+                    let first_xf = first_x as f32;
+                    let first_yf = first_y as f32;
+                    let mut rect_in = None;
+                    for rect in &rects {
+                        if first_xf >= rect.position.x
+                            && first_xf < rect.position.x + rect.width
+                            && first_yf >= rect.position.y
+                            && first_yf < rect.position.y + rect.height
+                        {
+                            rect_in = Some(rect);
+                            break;
                         }
-
-                        disallowed
-                    }
-                    WaveTile::Observed(_) => Vec::new(),
-                };
-
-                if let WaveTile::Unobserved(items) = self.wave.get_mut(child_x, child_y) {
-                    for option in disallowed_options {
-                        items[option] = false;
                     }
 
-                    if !visited.contains(&(child_x, child_y)) {
-                        propagation_queue.push_back((child_x, child_y));
+                    match rect_in {
+                        Some(r) => {
+                            x = (r.position.x + r.width) as usize;
+                            y = first_y;
+                            if x >= bitmap.width {
+                                x = 0;
+                                y += 1;
+                            }
+                        }
+                        None => {
+                            break (first_x, first_y);
+                        }
                     }
                 }
-            }
-        }
-
-        Ok(())
-    }
-
-    #[inline]
-    fn get_children(&self, x: usize, y: usize) -> Vec<((usize, usize), u8)> {
-        let mut children = Vec::new();
-        if y > 0 {
-            children.push(((x, y - 1), 0));
-        }
-        if x > 0 {
-            children.push(((x - 1, y), 1));
-        }
-        if y < self.wave.height - 1 {
-            children.push(((x, y + 1), 2));
-        }
-        if x < self.wave.width - 1 {
-            children.push(((x + 1, y), 3));
-        }
-
-        children
-    }
-
-    #[inline]
-    fn is_allowed(&self, tile_one_idx: usize, tile_two_idx: usize, side: u8) -> bool {
-        self.tileset.allowed_neighbors[tile_one_idx][side as usize][tile_two_idx]
-    }
-
-    fn index_to_tile(&self, index: usize) -> Tile {
-        let base_index = index / 4;
-        let rotation = index % 4;
-        Tile {
-            base_tile_idx: base_index,
-            rotation: rotation.try_into().unwrap(),
-        }
-    }
-
-    /// renders current wave to texture/image
-    pub fn render(&self) -> Result<DynamicImage, Error> {
-        let width = self.wave.width * self.tileset.tile_size;
-        let height = self.wave.height * self.tileset.tile_size;
-
-        let mut img: ImageBuffer<Rgb<u8>, Vec<u8>> =
-            ImageBuffer::new(width.try_into().unwrap(), height.try_into().unwrap());
-
-        for x in 0..self.wave.width {
-            for y in 0..self.wave.height {
-                let wave_slot = self.wave.get(x, y);
-                match wave_slot {
-                    WaveTile::Observed(tile_idx) => {
-                        let tile = self.index_to_tile(*tile_idx);
-                        let tile_name = &self.tileset.tile_names[tile.base_tile_idx];
-                        let base_img = &self
-                            .tileset
-                            .tiles
-                            .get(tile_name)
-                            .expect("tile not found")
-                            .img;
-                        let rotated_img = match tile.rotation {
-                            0 => base_img.clone(),
-                            1 => base_img.rotate270(),
-                            2 => base_img.rotate180(),
-                            3 => base_img.rotate90(),
-                            _ => base_img.clone(),
-                        };
-
-                        let tile_img = rotated_img.to_rgb8();
-
-                        let px = (x * self.tileset.tile_size) as u32;
-                        let py = (y * self.tileset.tile_size) as u32;
-
-                        img.copy_from(&tile_img, px, py)?;
-                    }
-                    WaveTile::Unobserved(_) => (),
+                None => {
+                    return rects;
                 }
             }
-        }
+        };
 
-        Ok(DynamicImage::from(img))
+        let top_right = match bitmap.white_or_end(top_left.0, top_left.1) {
+            Some(tr) => tr,
+            None => unreachable!("couldn't find top right of rectangle"),
+        };
+
+        assert!(top_left.1 == top_right.1);
+
+        let bottom = bitmap.bottom(top_left.0, top_right.0, top_left.1);
+
+        rects.push(RectangularPrism::new(
+            Point3::new(top_left.0 as f32, top_left.1 as f32, 0f32),
+            (top_right.0 - top_left.0 + 1) as f32,
+            (bottom - top_left.1 + 1) as f32,
+            1f32,
+        ));
+
+        // continue from top-right
+        match bitmap.next(top_right.0, top_right.1) {
+            Some((next_x, next_y)) => {
+                x = next_x;
+                y = next_y;
+            }
+            None => {
+                return rects;
+            }
+        }
     }
+}
+
+pub fn generate_world() -> Result<Vec<RectangularPrism>, Error> {
+    // let seed: u64 = rng().random();
+    // let tileset = parse_tileset_xml("src/procgen/tilemaps/Rooms/tileset.xml")?;
+
+    // let n = 20;
+    // let mut wfc = WaveFunctionCollapse::new(tileset, n, n, seed);
+    // wfc.step_all();
+    // let img = wfc.render()?;
+    let img = image::open("./save.png")?;
+
+    let bitmap = Bitmap::from_image(img);
+
+    let rects = bitmap_to_rects(bitmap);
+
+    Ok(rects)
 }

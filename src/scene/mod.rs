@@ -4,16 +4,15 @@ mod vertex;
 
 use std::{collections::HashMap, ops::Range};
 
-use cgmath::SquareMatrix;
 use tessellate::Cube;
-use types::{Mesh, ObjectData};
-pub use types::{Scene, Shape};
+use types::Mesh;
+pub use types::{RectangularPrism, Scene, Shape};
 pub use vertex::Vertex;
 
-use crate::scene::types::LightUniform;
+use crate::scene::types::{LightUniform, ObjectData};
 
 impl Scene {
-    pub fn new(tessellation_param_1: u32) -> Self {
+    pub fn new(tessellation_param_1: u32, rects: Vec<RectangularPrism>) -> Self {
         // tessellate shapes
         let mut vertices = Vec::new();
         let mut meshes = HashMap::new();
@@ -23,10 +22,11 @@ impl Scene {
 
         // populate objects
         let mut objects = HashMap::new();
-        objects.insert(
-            Shape::Cube,
-            vec![ObjectData::new(cgmath::Matrix4::identity())],
-        );
+        let mut cubes = Vec::new();
+        for rect in rects {
+            cubes.push(ObjectData::new(rect.to_ctm()));
+        }
+        objects.insert(Shape::Cube, cubes);
 
         // lights
         let light = LightUniform {

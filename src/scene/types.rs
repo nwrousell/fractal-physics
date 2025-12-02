@@ -1,8 +1,35 @@
 use std::collections::HashMap;
 
-use cgmath::SquareMatrix;
+use cgmath::{EuclideanSpace, Point3, SquareMatrix};
 
 use crate::scene::Vertex;
+
+#[derive(Debug)]
+pub struct RectangularPrism {
+    /// position of top-front-left
+    pub position: Point3<f32>,
+    pub width: f32,
+    pub height: f32,
+    pub depth: f32,
+}
+
+impl RectangularPrism {
+    pub fn new(position: Point3<f32>, width: f32, height: f32, depth: f32) -> Self {
+        RectangularPrism {
+            position,
+            width,
+            height,
+            depth,
+        }
+    }
+
+    pub fn to_ctm(&self) -> cgmath::Matrix4<f32> {
+        let scale = cgmath::Matrix4::from_nonuniform_scale(self.width, self.height, self.depth);
+        let offset = cgmath::Vector3::new(0.5 * self.width, -0.5 * self.height, -0.5 * self.depth);
+        let translation = cgmath::Matrix4::from_translation(self.position.to_vec() + offset);
+        translation * scale
+    }
+}
 
 /// Represents a point light
 #[repr(C)]
