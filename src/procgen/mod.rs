@@ -10,6 +10,9 @@ mod parse;
 mod types;
 mod wfc;
 
+pub use parse::parse_tileset_xml;
+pub use wfc::WaveFunctionCollapse;
+
 struct Bitmap {
     bits: Vec<bool>,
     width: usize,
@@ -190,18 +193,14 @@ fn bitmap_to_rects(bitmap: Bitmap) -> Vec<RectangularPrism> {
 }
 
 pub fn generate_world() -> Result<Vec<RectangularPrism>, Error> {
-    // let seed: u64 = rng().random();
-    // let tileset = parse_tileset_xml("src/procgen/tilemaps/Rooms/tileset.xml")?;
+    generate_world_from_png("./save.png")
+}
 
-    // let n = 20;
-    // let mut wfc = WaveFunctionCollapse::new(tileset, n, n, seed);
-    // wfc.step_all();
-    // let img = wfc.render()?;
-    let img = image::open("./save.png")?;
-
+pub fn generate_world_from_png<P: AsRef<Path>>(
+    png_path: P,
+) -> Result<Vec<RectangularPrism>, Error> {
+    let img = image::open(png_path)?;
     let bitmap = Bitmap::from_image(img);
-
     let rects = bitmap_to_rects(bitmap);
-
     Ok(rects)
 }

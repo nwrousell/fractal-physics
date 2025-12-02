@@ -49,5 +49,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         }
     }
 
-    return max(dx, dy);
+    let edge = max(dx, dy);
+    return vec4<f32>(edge.rgb, 1.0);
 }

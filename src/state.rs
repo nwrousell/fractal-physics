@@ -1,18 +1,16 @@
 use std::sync::Arc;
 
-use cgmath::Point3;
 use wgpu::{TextureView, util::DeviceExt};
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 use crate::{
     camera::{Camera, CameraController, CameraUniform},
-    procgen::generate_world,
-    scene::{RectangularPrism, Scene, Shape, Vertex},
-    texture,
+    procgen::{generate_world, generate_world_from_png},
+    scene::{Scene, Shape, Vertex},
 };
 
 pub struct State {
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -20,7 +18,7 @@ pub struct State {
     render_pipeline: wgpu::RenderPipeline,
     postprocess_render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    pub window: Arc<Window>,
+    pub window: Option<Arc<Window>>,
     // diffuse_bind_group: wgpu::BindGroup,
     // diffuse_texture: texture::Texture,
     camera: Camera,
@@ -35,7 +33,43 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+    pub async fn new_headless(
+        png_path: Option<&str>,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<Self> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            #[cfg(not(target_arch = "wasm32"))]
+            backends: wgpu::Backends::PRIMARY,
+            #[cfg(target_arch = "wasm32")]
+            // backends: wgpu::Backends::GL,
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            ..Default::default()
+        });
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .await?;
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            width: width,
+            height: height,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+
+        Ok(State::new(adapter, png_path, config, None, None).await?)
+    }
+
+    pub async fn new_with_png(window: Arc<Window>, png_path: Option<&str>) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -56,24 +90,6 @@ impl State {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
-            })
-            .await?;
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
-                // required_limits: if cfg!(target_arch = "wasm32") {
-                //     wgpu::Limits::downlevel_webgl2_defaults()
-                // } else {
-                //     wgpu::Limits::default()
-                // },
-                required_limits: wgpu::Limits::default(),
-                memory_hints: Default::default(),
-                trace: wgpu::Trace::Off,
             })
             .await?;
 
@@ -98,56 +114,39 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        // let diffuse_bytes = include_bytes!("tree.png");
-        // let diffuse_texture =
-        //     texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "tree.png").unwrap();
+        // SAFETY: The surface lifetime is tied to the window, but since we store the window
+        // in an Arc in the State struct, the window will outlive the State, making it safe
+        // to extend the lifetime to 'static.
+        let surface: wgpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
+        Ok(State::new(adapter, png_path, config, Some(window), Some(surface)).await?)
+    }
 
-        // let texture_bind_group_layout =
-        //     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        //         entries: &[
-        //             wgpu::BindGroupLayoutEntry {
-        //                 binding: 0,
-        //                 visibility: wgpu::ShaderStages::FRAGMENT,
-        //                 ty: wgpu::BindingType::Texture {
-        //                     multisampled: false,
-        //                     view_dimension: wgpu::TextureViewDimension::D2,
-        //                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
-        //                 },
-        //                 count: None,
-        //             },
-        //             wgpu::BindGroupLayoutEntry {
-        //                 binding: 1,
-        //                 visibility: wgpu::ShaderStages::FRAGMENT,
-        //                 // This should match the filterable field of the
-        //                 // corresponding Texture entry above.
-        //                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-        //                 count: None,
-        //             },
-        //         ],
-        //         label: Some("texture_bind_group_layout"),
-        //     });
-
-        // let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        //     layout: &texture_bind_group_layout,
-        //     entries: &[
-        //         wgpu::BindGroupEntry {
-        //             binding: 0,
-        //             resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-        //         },
-        //         wgpu::BindGroupEntry {
-        //             binding: 1,
-        //             resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-        //         },
-        //     ],
-        //     label: Some("diffuse_bind_group"),
-        // });
-
-        let rects = generate_world()?;
+    async fn new(
+        adapter: wgpu::Adapter,
+        png_path: Option<&str>,
+        config: wgpu::SurfaceConfiguration,
+        window: Option<Arc<Window>>,
+        surface: Option<wgpu::Surface<'static>>,
+    ) -> anyhow::Result<Self> {
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: None,
+                required_features: wgpu::Features::empty(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: Default::default(),
+                trace: wgpu::Trace::Off,
+            })
+            .await?;
+        let rects = match png_path {
+            Some(path) => generate_world_from_png(path)?,
+            None => generate_world()?,
+        };
 
         let scene = Scene::new(4, rects);
         let camera = Camera {
-            eye: (0.0, 1.0, -2.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
+            eye: (30.0, 30.0, -80.0).into(),
+            target: (30.0, 30.0, 80.0).into(),
             up: cgmath::Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
@@ -445,19 +444,40 @@ impl State {
         if width > 0 && height > 0 {
             self.config.width = width;
             self.config.height = height;
-            self.surface.configure(&self.device, &self.config);
+            match &self.surface {
+                Some(surface) => {
+                    surface.configure(&self.device, &self.config);
+                }
+                None => todo!(),
+            }
             self.is_surface_configured = true;
         }
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        self.window.request_redraw();
-
         // We can't render unless the surface is configured
         if !self.is_surface_configured {
             return Ok(());
         }
 
+        match (&self.surface, &self.window) {
+            (Some(surface), Some(window)) => {
+                let output = surface.get_current_texture()?;
+
+                window.request_redraw();
+                let view = output
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                self.render_to_view(view)?;
+                output.present();
+                Ok(())
+            }
+            _ => panic!("render called without a window"),
+        }
+    }
+
+    pub fn render_to_view(&mut self, view: wgpu::TextureView) -> Result<(), wgpu::SurfaceError> {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -499,12 +519,6 @@ impl State {
             }
         }
 
-        let output = self.surface.get_current_texture()?;
-
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Postprocessing Pass"),
@@ -534,7 +548,6 @@ impl State {
 
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
 
         Ok(())
     }
@@ -555,5 +568,109 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+    }
+
+    // https://sotrh.github.io/learn-wgpu/showcase/windowless/
+    pub async fn render_to_file<P: AsRef<std::path::Path>>(
+        &mut self,
+        output_path: P,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<()> {
+        let texture_desc = wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            label: None,
+            view_formats: &[],
+        };
+        let texture = self.device.create_texture(&texture_desc);
+        let texture_view = texture.create_view(&Default::default());
+
+        self.render_to_view(texture_view)?;
+
+        // we need to store this for later
+        let u32_size = std::mem::size_of::<u32>() as u32;
+        let bytes_per_pixel = u32_size;
+
+        // Align bytes_per_row to COPY_BYTES_PER_ROW_ALIGNMENT (256 bytes)
+        const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
+        let unpadded_bytes_per_row = bytes_per_pixel * width;
+        let bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT - 1)
+            / COPY_BYTES_PER_ROW_ALIGNMENT)
+            * COPY_BYTES_PER_ROW_ALIGNMENT;
+
+        let output_buffer_size = (bytes_per_row * height) as wgpu::BufferAddress;
+        let output_buffer_desc = wgpu::BufferDescriptor {
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST
+        // this tells wpgu that we want to read this buffer from the cpu
+        | wgpu::BufferUsages::MAP_READ,
+            label: None,
+            mapped_at_creation: false,
+        };
+        let output_buffer = self.device.create_buffer(&output_buffer_desc);
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                aspect: wgpu::TextureAspect::All,
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &output_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            texture_desc.size,
+        );
+
+        self.queue.submit(Some(encoder.finish()));
+
+        {
+            let buffer_slice = output_buffer.slice(..);
+
+            // NOTE: We have to create the mapping THEN device.poll() before await
+            // the future. Otherwise the application will freeze.
+            let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+            buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                tx.send(result).unwrap();
+            });
+            self.device.poll(wgpu::PollType::wait_indefinitely())?;
+            rx.receive().await.unwrap().unwrap();
+
+            let data = buffer_slice.get_mapped_range();
+
+            use image::{ImageBuffer, Rgba};
+            // Extract only the unpadded row data (skip padding bytes)
+            let mut unpadded_data = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+            for row in 0..height {
+                let row_start = (row * bytes_per_row) as usize;
+                let row_end = row_start + unpadded_bytes_per_row as usize;
+                unpadded_data.extend_from_slice(&data[row_start..row_end]);
+            }
+
+            let buffer =
+                ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, unpadded_data).unwrap();
+            buffer.save(output_path).unwrap();
+        }
+        output_buffer.unmap();
+
+        Ok(())
     }
 }

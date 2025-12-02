@@ -14,16 +14,21 @@ pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<State>>,
     state: Option<State>,
+    png_path: Option<String>,
 }
 
 impl App {
-    pub fn new(#[cfg(target_arch = "wasm32")] event_loop: &EventLoop<State>) -> Self {
+    pub fn new(
+        #[cfg(target_arch = "wasm32")] event_loop: &EventLoop<State>,
+        png_path: Option<String>,
+    ) -> Self {
         #[cfg(target_arch = "wasm32")]
         let proxy = Some(event_loop.create_proxy());
         Self {
             state: None,
             #[cfg(target_arch = "wasm32")]
             proxy,
+            png_path,
         }
     }
 }
@@ -49,23 +54,25 @@ impl ApplicationHandler<State> for App {
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
+        let png_path = self.png_path.as_deref();
         #[cfg(not(target_arch = "wasm32"))]
         {
             // If we are not on web we can use pollster to
             // await the
-            self.state = Some(pollster::block_on(State::new(window)).unwrap());
+            self.state = Some(pollster::block_on(State::new_with_png(window, png_path)).unwrap());
         }
 
         #[cfg(target_arch = "wasm32")]
         {
             // Run the future asynchronously and use the
             // proxy to send the results to the event loop
+            let png_path = png_path.map(|s| s.to_string());
             if let Some(proxy) = self.proxy.take() {
                 wasm_bindgen_futures::spawn_local(async move {
                     assert!(
                         proxy
                             .send_event(
-                                State::new(window)
+                                State::new_with_png(window, png_path.as_deref())
                                     .await
                                     .expect("Unable to create canvas!!!")
                             )
@@ -110,8 +117,13 @@ impl ApplicationHandler<State> for App {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        let size = state.window.inner_size();
-                        state.resize(size.width, size.height);
+                        match &state.window {
+                            Some(window) => {
+                                let size = window.inner_size();
+                                state.resize(size.width, size.height);
+                            }
+                            None => unreachable!(),
+                        }
                     }
                     Err(e) => {
                         log::error!("Unable to render {}", e);
