@@ -12,7 +12,7 @@ struct ObjectData {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
-@group(1) @binding(0)
+@group(2) @binding(0)
 var<storage, read> object_data : array<ObjectData>;
 
 struct VertexInput {
@@ -46,33 +46,36 @@ fn vs_main(
 
 struct Light {
     position: vec3<f32>,
+    used: u32,
     color: vec3<f32>,
 };
 
-@group(0) @binding(1)
-var<uniform> light: Light;
-
-// @group(0) @binding(0)
-// var t_diffuse: texture_2d<f32>;
-// @group(0) @binding(1)
-// var s_diffuse: sampler;
+@group(1) @binding(0)
+var<uniform> lights: array<Light, 8>;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // return textureSample(t_diffuse, s_diffuse, in.tex_coords);
     let object_color = vec4<f32>(0.1, 0.1, 0.1, 1.0);
 
     // ambient
     let ambient_strength = 0.2;
     var result = object_color * ambient_strength;
 
-    // diffuse
+    // for each light
     let diffuse_strength = 0.8;
-    let direction_to_light = light.position - in.clip_position.xyz;
-    let lambert_factor = max(0, dot(direction_to_light, in.normal));
-    result += vec4<f32>(light.color, 1.0) * lambert_factor * diffuse_strength;
+    for (var i = 0u; i < 8u; i++) {
+        if (lights[i].used != 0u) {
+            let light = lights[i];
+            let direction_to_light = light.position - in.clip_position.xyz;
 
-    // specular
+            // diffuse
+            let lambert_factor = max(0.0, dot(normalize(direction_to_light), in.normal));
+            result += vec4<f32>(light.color, 1.0) * lambert_factor * diffuse_strength;
+
+            // specular
+            // TODO
+        }
+    }
 
     return result;
 }

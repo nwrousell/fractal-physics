@@ -1,4 +1,7 @@
+use wgpu::util::DeviceExt;
 use winit::keyboard::KeyCode;
+
+use crate::buffer::Buffer;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -16,12 +19,12 @@ impl CameraUniform {
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+    pub fn update_view_proj(&mut self, config: &CameraConfig) {
+        self.view_proj = config.build_view_projection_matrix().into();
     }
 }
 
-pub struct Camera {
+pub struct CameraConfig {
     /// position of camera in world space
     pub eye: cgmath::Point3<f32>,
 
@@ -37,6 +40,129 @@ pub struct Camera {
     pub zfar: f32,
 }
 
+pub struct Camera {
+    config: CameraConfig,
+    uniform: CameraUniform,
+    controller: CameraController,
+
+    buffer: Option<wgpu::Buffer>,
+    bind_group: Option<wgpu::BindGroup>,
+    bind_group_layout: Option<wgpu::BindGroupLayout>,
+}
+
+impl Camera {
+    pub fn new(config: CameraConfig) -> Self {
+        let mut uniform = CameraUniform::new();
+        uniform.update_view_proj(&config);
+        Self {
+            config,
+            controller: CameraController::new(0.02),
+            bind_group: None,
+            bind_group_layout: None,
+            buffer: None,
+            uniform,
+        }
+    }
+
+    pub fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
+        self.controller.handle_key(code, is_pressed)
+    }
+
+    pub fn update(&mut self) {
+        use cgmath::InnerSpace;
+        let forward = self.config.target - self.config.eye;
+        let forward_norm = forward.normalize();
+        let forward_mag = forward.magnitude();
+
+        // Forward/backward movement
+        if self.controller.is_forward_pressed && forward_mag > self.controller.speed {
+            self.config.eye += forward_norm * self.controller.speed;
+            self.config.target += forward_norm * self.controller.speed;
+        }
+        if self.controller.is_backward_pressed {
+            self.config.eye -= forward_norm * self.controller.speed;
+            self.config.target -= forward_norm * self.controller.speed;
+        }
+
+        // Calculate right vector for lateral movement
+        let right = forward_norm.cross(self.config.up).normalize();
+
+        // Left/right lateral movement
+        if self.controller.is_right_pressed {
+            self.config.eye += right * self.controller.speed;
+            self.config.target += right * self.controller.speed;
+        }
+        if self.controller.is_left_pressed {
+            self.config.eye -= right * self.controller.speed;
+            self.config.target -= right * self.controller.speed;
+        }
+
+        // Up/down movement along the up vector
+        if self.controller.is_up_pressed {
+            self.config.eye += self.config.up * self.controller.speed;
+            self.config.target += self.config.up * self.controller.speed;
+        }
+        if self.controller.is_down_pressed {
+            self.config.eye -= self.config.up * self.controller.speed;
+            self.config.target -= self.config.up * self.controller.speed;
+        }
+
+        self.uniform.update_view_proj(&self.config);
+    }
+}
+
+impl Buffer for Camera {
+    fn init_buffer(&mut self, device: &wgpu::Device) {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[self.uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("camera_bind_group_layout"),
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
+
+        self.buffer = Some(buffer);
+        self.bind_group = Some(bind_group);
+        self.bind_group_layout = Some(bind_group_layout);
+    }
+
+    fn bind_group(&self) -> Option<&wgpu::BindGroup> {
+        self.bind_group.as_ref()
+    }
+
+    fn bind_group_layout(&self) -> Option<&wgpu::BindGroupLayout> {
+        self.bind_group_layout.as_ref()
+    }
+
+    fn write_buffer(&self, queue: &wgpu::Queue) {
+        match &self.buffer {
+            None => panic!("write_buffer called without buffer set"),
+            Some(buffer) => queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[self.uniform])),
+        };
+    }
+}
+
 #[rustfmt::skip]
 // Converts from OpenGL's view volume with z in [-1, 1] (which cgmath assumes) to WebGPU's volume with z in [0, 1]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
@@ -46,7 +172,7 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
     cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
 );
 
-impl Camera {
+impl CameraConfig {
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
@@ -105,46 +231,6 @@ impl CameraController {
                 true
             }
             _ => false,
-        }
-    }
-
-    pub fn update_camera(&self, camera: &mut Camera) {
-        use cgmath::InnerSpace;
-        let forward = camera.target - camera.eye;
-        let forward_norm = forward.normalize();
-        let forward_mag = forward.magnitude();
-
-        // Forward/backward movement
-        if self.is_forward_pressed && forward_mag > self.speed {
-            camera.eye += forward_norm * self.speed;
-            camera.target += forward_norm * self.speed;
-        }
-        if self.is_backward_pressed {
-            camera.eye -= forward_norm * self.speed;
-            camera.target -= forward_norm * self.speed;
-        }
-
-        // Calculate right vector for lateral movement
-        let right = forward_norm.cross(camera.up).normalize();
-
-        // Left/right lateral movement
-        if self.is_right_pressed {
-            camera.eye += right * self.speed;
-            camera.target += right * self.speed;
-        }
-        if self.is_left_pressed {
-            camera.eye -= right * self.speed;
-            camera.target -= right * self.speed;
-        }
-
-        // Up/down movement along the up vector
-        if self.is_up_pressed {
-            camera.eye += camera.up * self.speed;
-            camera.target += camera.up * self.speed;
-        }
-        if self.is_down_pressed {
-            camera.eye -= camera.up * self.speed;
-            camera.target -= camera.up * self.speed;
         }
     }
 }

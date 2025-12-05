@@ -10,11 +10,12 @@ use crate::procgen::{
 use crate::state::State;
 
 mod app;
+mod buffer;
 mod camera;
+mod postprocess;
 mod procgen;
 mod scene;
 mod state;
-mod texture;
 
 pub fn render_rects_to_file<P: AsRef<std::path::Path>>(
     png_path: Option<P>,

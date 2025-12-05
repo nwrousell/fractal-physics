@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use wgpu::{TextureView, util::DeviceExt};
+use wgpu::util::DeviceExt;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 use crate::{
-    camera::{Camera, CameraController, CameraUniform},
+    buffer::Buffer,
+    camera::{Camera, CameraConfig},
+    postprocess::PostprocessState,
     procgen::{generate_world, generate_world_from_png},
-    scene::{Scene, Shape, Vertex},
+    scene::{Scene, Vertex},
 };
 
 pub struct State {
@@ -16,20 +18,12 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     render_pipeline: wgpu::RenderPipeline,
-    postprocess_render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     pub window: Option<Arc<Window>>,
-    // diffuse_bind_group: wgpu::BindGroup,
-    // diffuse_texture: texture::Texture,
+
     camera: Camera,
-    camera_uniform: CameraUniform,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
-    camera_controller: CameraController,
     scene: Scene,
-    ctm_bind_groups: Vec<(Shape, (wgpu::Buffer, wgpu::BindGroup))>,
-    intermediate_texture_view: TextureView,
-    intermediate_texture_bind_group: wgpu::BindGroup,
+    postprocess_state: PostprocessState,
 }
 
 impl State {
@@ -143,8 +137,10 @@ impl State {
             None => generate_world()?,
         };
 
-        let scene = Scene::new(4, rects);
-        let camera = Camera {
+        let mut scene = Scene::new(4, rects);
+        scene.init_buffers(&device);
+
+        let camera_config = CameraConfig {
             eye: (30.0, 30.0, -80.0).into(),
             target: (30.0, 30.0, 80.0).into(),
             up: cgmath::Vector3::unit_y(),
@@ -153,80 +149,8 @@ impl State {
             znear: 0.1,
             zfar: 300.0,
         };
-
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
-
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light Buffer"),
-            contents: scene.light_buffer(),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-                label: Some("camera_bind_group_layout"),
-            });
-
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: light_buffer.as_entire_binding(),
-                },
-            ],
-            label: Some("camera_bind_group"),
-        });
-
-        let ctm_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("CTM Bind Group Layout"),
-            });
-
-        let mut ctm_bind_groups = Vec::new();
+        let mut camera = Camera::new(camera_config);
+        camera.init_buffer(&device);
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
@@ -234,33 +158,21 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let cube_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("CTM Buffer (Cube)"),
-            contents: scene.ctms(Shape::Cube),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
-        });
-        let cube_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &ctm_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: cube_buffer.as_entire_binding(),
-            }],
-            label: Some("Cube Bind Group"),
-        });
-        ctm_bind_groups.push((Shape::Cube, (cube_buffer, cube_bind_group)));
-
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-                    // &texture_bind_group_layout,
-                    &camera_bind_group_layout,
-                    &ctm_bind_group_layout,
+                    camera.bind_group_layout().unwrap(),
+                    scene.lights.bind_group_layout().unwrap(),
+                    &scene
+                        .object_collections
+                        .first()
+                        .unwrap()
+                        .bind_group_layout()
+                        .unwrap(),
                 ],
                 push_constant_ranges: &[],
             });
-
-        let camera_controller = CameraController::new(0.02);
 
         let shader = wgpu::ShaderModuleDescriptor {
             label: Some("Normal Shader"),
@@ -281,90 +193,7 @@ impl State {
             height: config.height,
             depth_or_array_layers: 1,
         };
-        let intermediate_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Intermediate Texture"),
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: config.format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        let intermediate_texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        let intermediate_texture_view =
-            intermediate_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let intermediate_texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("intermediate_texture_bind_group_layout"),
-            });
-
-        let intermediate_texture_bind_group =
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &intermediate_texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&intermediate_texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&intermediate_texture_sampler),
-                    },
-                ],
-                label: Some("intermediate_texture_bind_group"),
-            });
-
-        let postprocess_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Postprocess Pipeline Layout"),
-                bind_group_layouts: &[&intermediate_texture_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let shader = wgpu::ShaderModuleDescriptor {
-            label: Some("Postprocess Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("postprocess.wgsl").into()),
-        };
-        let postprocess_render_pipeline = State::create_render_pipeline(
-            &device,
-            &postprocess_pipeline_layout,
-            config.format,
-            shader,
-            &[],
-            "Postprocessing Pipeline",
-        );
+        let postprocess_state = PostprocessState::new(&device, texture_extent, config.format);
 
         Ok(Self {
             surface,
@@ -373,21 +202,13 @@ impl State {
             config,
             is_surface_configured: false,
             render_pipeline,
-            postprocess_render_pipeline,
             vertex_buffer,
             window,
-            // diffuse_bind_group,
-            // diffuse_texture,
+
             camera,
-            camera_uniform,
-            camera_buffer,
-            camera_bind_group,
-            camera_controller,
-            ctm_bind_groups,
 
             scene,
-            intermediate_texture_view,
-            intermediate_texture_bind_group,
+            postprocess_state,
         })
     }
 
@@ -488,7 +309,7 @@ impl State {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.intermediate_texture_view,
+                    view: &self.postprocess_state.intermediate_texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -507,43 +328,20 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            // render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(0, self.camera.bind_group().unwrap(), &[]);
+            render_pass.set_bind_group(1, self.scene.lights.bind_group().unwrap(), &[]);
 
-            for (shape, (_, bind_group)) in &self.ctm_bind_groups {
-                render_pass.set_bind_group(1, bind_group, &[]);
+            for object_collection in &self.scene.object_collections {
                 render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                render_pass.set_bind_group(2, object_collection.bind_group().unwrap(), &[]);
 
-                let (vertex_range, instance_range) = self.scene.shape_ranges(shape);
+                let (vertex_range, instance_range) = object_collection.object_ranges();
                 render_pass.draw(vertex_range, instance_range);
             }
         }
 
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Postprocessing Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-
-            render_pass.set_pipeline(&self.postprocess_render_pipeline);
-            render_pass.set_bind_group(0, &self.intermediate_texture_bind_group, &[]);
-            render_pass.draw(0..3, 0..1);
+            self.postprocess_state.render_pass(&mut encoder, &view);
         }
 
         // submit will accept anything that implements IntoIter
@@ -556,18 +354,13 @@ impl State {
         if code == KeyCode::Escape && is_pressed {
             event_loop.exit();
         } else {
-            self.camera_controller.handle_key(code, is_pressed);
+            self.camera.handle_key(code, is_pressed);
         }
     }
 
     pub fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
-        );
+        self.camera.update();
+        self.camera.write_buffer(&self.queue);
     }
 
     // https://sotrh.github.io/learn-wgpu/showcase/windowless/
