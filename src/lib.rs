@@ -5,67 +5,19 @@ use wasm_bindgen::prelude::*;
 
 use crate::app::App;
 use crate::game::Game;
-use crate::procgen::{WaveFunctionCollapse, generate_world_from_png, parse_tileset_xml};
+use crate::procgen::{
+    WaveFunctionCollapse, generate_world_from_png, parse_tileset_xml, render_rects_to_file,
+};
 use crate::scene::Scene;
+use anyhow::Result;
 
 mod app;
 mod buffer;
 mod camera;
 mod game;
-mod postprocess;
 mod procgen;
 mod scene;
-
-pub fn render_rects_to_file<P: AsRef<std::path::Path>>(
-    png_path: P,
-    output_path: P,
-) -> anyhow::Result<()> {
-    let rects = generate_world_from_png(png_path)?;
-
-    // Create a 160x160 RGB image
-    let mut img = image::RgbImage::new(160, 160);
-
-    // Fill with white background
-    for pixel in img.pixels_mut() {
-        *pixel = image::Rgb([255, 255, 255]);
-    }
-
-    // Draw each rect with a random color
-    let mut rng = rand::rng();
-    use rand::Rng;
-
-    for rect in &rects {
-        // Generate random color
-        let r = rng.random_range(0..=255);
-        let g = rng.random_range(0..=255);
-        let b = rng.random_range(0..=255);
-        let color = image::Rgb([r, g, b]);
-
-        // Convert 3D rect to 2D (top-down view using x and z coordinates)
-        let x = rect.position.x as i32;
-        let y = rect.position.y as i32;
-        let width = (rect.width - 1.0) as i32;
-        let height = (rect.height) as i32;
-
-        // Draw the rectangle
-        for dy in 0..height {
-            for dx in 0..width {
-                let px = x + dx;
-                let py = y + dy;
-
-                // Check bounds
-                if px >= 0 && px < 160 && py >= 0 && py < 160 {
-                    img.put_pixel(px as u32, py as u32, color);
-                }
-            }
-        }
-    }
-
-    // Save the image
-    img.save(output_path)?;
-    println!("Saved with {} rectangles", rects.len());
-    Ok(())
-}
+mod texture;
 
 pub fn run_wfc<P: AsRef<std::path::Path>>(
     seed: u64,
@@ -78,8 +30,12 @@ pub fn run_wfc<P: AsRef<std::path::Path>>(
     wfc.step_all();
     let img = wfc.render()?;
     img.save(output_path)?;
-    println!("Saved WFC output with seed {} and size {}x{}", seed, n, n);
     Ok(())
+}
+
+pub fn parse_and_render_rects(world_path: &str, out_path: &str) -> Result<()> {
+    let (rects, width, height) = generate_world_from_png(world_path)?;
+    render_rects_to_file(rects, width, height, out_path)
 }
 
 pub fn run_interactive(world_png_path: &str, do_postprocess: bool) -> anyhow::Result<()> {
@@ -93,7 +49,8 @@ pub fn run_interactive(world_png_path: &str, do_postprocess: bool) -> anyhow::Re
     }
 
     let event_loop: EventLoop<crate::game::Game> = EventLoop::with_user_event().build()?;
-    let rects = generate_world_from_png(world_png_path)?;
+
+    let (rects, _, _) = generate_world_from_png(world_png_path)?;
     let scene = Scene::new(4, rects);
 
     let mut app = App::new(
@@ -114,7 +71,7 @@ pub fn render_scene_to_file<P: AsRef<std::path::Path>>(
     height: u32,
     do_postprocess: bool,
 ) -> anyhow::Result<()> {
-    let rects = generate_world_from_png(png_path)?;
+    let (rects, _, _) = generate_world_from_png(png_path)?;
     let scene = Scene::new(4, rects);
 
     let mut state = pollster::block_on(Game::new_headless(scene, width, height, do_postprocess))?;

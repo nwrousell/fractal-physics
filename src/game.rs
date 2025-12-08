@@ -6,8 +6,8 @@ use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 use crate::{
     buffer::Buffer,
     camera::{Camera, CameraConfig},
-    postprocess::PostprocessState,
     scene::{Scene, Vertex},
+    texture::{PostprocessTexture, Texture},
 };
 
 pub struct Game {
@@ -19,7 +19,9 @@ pub struct Game {
     render_pipeline: wgpu::RenderPipeline,
     pub window: Option<Arc<Window>>,
 
-    postprocess_state: PostprocessState,
+    depth_texture: Texture,
+
+    postprocess_texture: PostprocessTexture,
     do_postprocess: bool,
 
     vertex_buffer: wgpu::Buffer,
@@ -168,6 +170,8 @@ impl Game {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let depth_texture = Texture::create_depth_texture(&device, &config, "Depth Texture");
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -203,7 +207,7 @@ impl Game {
             height: config.height,
             depth_or_array_layers: 1,
         };
-        let postprocess_state = PostprocessState::new(&device, texture_extent, config.format);
+        let postprocess_texture = PostprocessTexture::new(&device, texture_extent, config.format);
 
         Ok(Self {
             surface,
@@ -214,7 +218,9 @@ impl Game {
             render_pipeline,
             window,
 
-            postprocess_state,
+            depth_texture,
+
+            postprocess_texture,
             do_postprocess,
 
             vertex_buffer,
@@ -261,7 +267,13 @@ impl Game {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None, // not using depth buffer
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1, // not doing multisampling
                 mask: !0,
@@ -282,6 +294,8 @@ impl Game {
                 }
                 None => todo!(),
             }
+            self.depth_texture =
+                Texture::create_depth_texture(&self.device, &self.config, "Depth Texture");
             self.is_surface_configured = true;
         }
     }
@@ -317,7 +331,7 @@ impl Game {
             });
 
         let first_view = if self.do_postprocess {
-            &self.postprocess_state.intermediate_texture_view
+            &self.postprocess_texture.texture.view
         } else {
             &view
         };
@@ -339,7 +353,14 @@ impl Game {
                     },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
@@ -358,7 +379,7 @@ impl Game {
         }
 
         if self.do_postprocess {
-            self.postprocess_state.render_pass(&mut encoder, &view);
+            self.postprocess_texture.render_pass(&mut encoder, &view);
         }
 
         // submit will accept anything that implements IntoIter

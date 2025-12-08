@@ -37,7 +37,10 @@ impl RectangularPrism {
 
     pub fn to_ctm(&self) -> cgmath::Matrix4<f32> {
         let scale = cgmath::Matrix4::from_nonuniform_scale(self.width, self.height, self.depth);
-        let offset = cgmath::Vector3::new(0.5 * self.width, -0.5 * self.height, -0.5 * self.depth);
+
+        // offset so that position describes top-front-left instead of center
+        let offset = cgmath::Vector3::new(-0.5 * self.width, -0.5 * self.height, -0.5 * self.depth);
+
         let translation = cgmath::Matrix4::from_translation(self.position.to_vec() + offset);
         translation * scale
     }

@@ -1,6 +1,8 @@
 use anyhow::Error;
 use clap::{Parser, Subcommand};
-use placeholder_name_lib::{render_rects_to_file, render_scene_to_file, run_interactive, run_wfc};
+use placeholder_name_lib::{
+    parse_and_render_rects, render_scene_to_file, run_interactive, run_wfc,
+};
 
 #[derive(Parser)]
 #[command(name = "placeholder-name")]
@@ -44,7 +46,7 @@ enum Commands {
         height: u32,
 
         /// disables postprocessing
-        #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
+        #[arg(long, default_value_t = false)]
         dont_postprocess: bool,
     },
     /// Run WFC and save to file
@@ -70,10 +72,10 @@ fn main() -> Result<(), Error> {
             from,
             dont_postprocess,
         } => {
-            run_interactive(from.as_str(), !dont_postprocess)?;
+            run_interactive(&from, !dont_postprocess)?;
         }
         Commands::RenderRects { path, from } => {
-            render_rects_to_file(from.as_str(), &path)?;
+            parse_and_render_rects(&from, &path)?;
         }
         Commands::RenderScene {
             path,
@@ -82,7 +84,7 @@ fn main() -> Result<(), Error> {
             height,
             dont_postprocess,
         } => {
-            render_scene_to_file(from.as_str(), &path, width, height, !dont_postprocess)?;
+            render_scene_to_file(&from, &path, width, height, !dont_postprocess)?;
         }
         Commands::Wfc {
             path,

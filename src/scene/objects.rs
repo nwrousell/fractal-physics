@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use cgmath::SquareMatrix;
+use cgmath::{Matrix, SquareMatrix};
 use wgpu::util::DeviceExt;
 
 use crate::buffer::Buffer;
@@ -21,8 +21,10 @@ impl ObjectData {
     pub fn new(ctm: cgmath::Matrix4<f32>) -> Self {
         let normal_matrix =
             cgmath::Matrix3::from_cols(ctm.x.truncate(), ctm.y.truncate(), ctm.z.truncate())
+                .transpose()
                 .invert()
                 .unwrap();
+        // TODO: fix ^
 
         let normal_matrix_padded = [
             [normal_matrix.x.x, normal_matrix.x.y, normal_matrix.x.z, 0.0],

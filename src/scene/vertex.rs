@@ -39,32 +39,3 @@ impl Vertex {
         }
     }
 }
-
-// pub const VERTICES: &[Vertex] = &[
-//     // Triangle 1: Top-left, Bottom-left, Top-right (CCW)
-//     Vertex {
-//         position: [-0.25, 0.25, 0.0],
-//         tex_coords: [0.0, 0.0],
-//     },
-//     Vertex {
-//         position: [-0.25, -0.25, 0.0],
-//         tex_coords: [0.0, 1.0],
-//     },
-//     Vertex {
-//         position: [0.25, 0.25, 0.0],
-//         tex_coords: [1.0, 0.0],
-//     },
-//     // Triangle 2: Top-right, Bottom-left, Bottom-right (CCW)
-//     Vertex {
-//         position: [0.25, 0.25, 0.0],
-//         tex_coords: [1.0, 0.0],
-//     },
-//     Vertex {
-//         position: [-0.25, -0.25, 0.0],
-//         tex_coords: [0.0, 1.0],
-//     },
-//     Vertex {
-//         position: [0.25, -0.25, 0.0],
-//         tex_coords: [1.0, 1.0],
-//     },
-// ];
