@@ -2,7 +2,6 @@ pub struct PostprocessState {
     #[allow(unused)]
     intermediate_texture: wgpu::Texture,
     pub intermediate_texture_view: wgpu::TextureView,
-    intermediate_texture_sampler: wgpu::Sampler,
     bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
 }
@@ -124,7 +123,6 @@ impl PostprocessState {
         Self {
             intermediate_texture,
             intermediate_texture_view,
-            intermediate_texture_sampler,
             bind_group,
             render_pipeline,
         }

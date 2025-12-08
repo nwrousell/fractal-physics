@@ -61,10 +61,6 @@ impl Lights {
             bind_group_layout: None,
         }
     }
-
-    pub fn lights(&self) -> &[LightUniform; 8] {
-        &self.lights
-    }
 }
 
 impl Buffer for Lights {

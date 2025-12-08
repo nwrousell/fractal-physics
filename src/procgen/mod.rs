@@ -192,10 +192,6 @@ fn bitmap_to_rects(bitmap: Bitmap) -> Vec<RectangularPrism> {
     }
 }
 
-pub fn generate_world() -> Result<Vec<RectangularPrism>, Error> {
-    generate_world_from_png("./save.png")
-}
-
 pub fn generate_world_from_png<P: AsRef<Path>>(
     png_path: P,
 ) -> Result<Vec<RectangularPrism>, Error> {

@@ -4,27 +4,23 @@ use winit::event_loop::EventLoop;
 use wasm_bindgen::prelude::*;
 
 use crate::app::App;
-use crate::procgen::{
-    WaveFunctionCollapse, generate_world, generate_world_from_png, parse_tileset_xml,
-};
-use crate::state::State;
+use crate::game::Game;
+use crate::procgen::{WaveFunctionCollapse, generate_world_from_png, parse_tileset_xml};
+use crate::scene::Scene;
 
 mod app;
 mod buffer;
 mod camera;
+mod game;
 mod postprocess;
 mod procgen;
 mod scene;
-mod state;
 
 pub fn render_rects_to_file<P: AsRef<std::path::Path>>(
-    png_path: Option<P>,
+    png_path: P,
     output_path: P,
 ) -> anyhow::Result<()> {
-    let rects = match png_path {
-        Some(path) => generate_world_from_png(path)?,
-        None => generate_world()?,
-    };
+    let rects = generate_world_from_png(png_path)?;
 
     // Create a 160x160 RGB image
     let mut img = image::RgbImage::new(160, 160);
@@ -75,9 +71,8 @@ pub fn run_wfc<P: AsRef<std::path::Path>>(
     seed: u64,
     n: usize,
     output_path: P,
-    tileset_path: Option<&str>,
+    tileset_path: &str,
 ) -> anyhow::Result<()> {
-    let tileset_path = tileset_path.unwrap_or("src/procgen/tilemaps/Rooms/tileset.xml");
     let tileset = parse_tileset_xml(tileset_path)?;
     let mut wfc = WaveFunctionCollapse::new(tileset, n, n, seed);
     wfc.step_all();
@@ -87,7 +82,7 @@ pub fn run_wfc<P: AsRef<std::path::Path>>(
     Ok(())
 }
 
-pub fn run_interactive(png_path: Option<&str>) -> anyhow::Result<()> {
+pub fn run_interactive(world_png_path: &str) -> anyhow::Result<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
@@ -97,12 +92,14 @@ pub fn run_interactive(png_path: Option<&str>) -> anyhow::Result<()> {
         console_log::init_with_level(log::Level::Info).unwrap_throw();
     }
 
-    let event_loop: EventLoop<crate::state::State> = EventLoop::with_user_event().build()?;
-    let png_path = png_path.map(|s| s.to_string());
+    let event_loop: EventLoop<crate::game::Game> = EventLoop::with_user_event().build()?;
+    let rects = generate_world_from_png(world_png_path)?;
+    let scene = Scene::new(4, rects);
+
     let mut app = App::new(
         #[cfg(target_arch = "wasm32")]
         &event_loop,
-        png_path,
+        scene,
     );
     event_loop.run_app(&mut app)?;
 
@@ -110,18 +107,21 @@ pub fn run_interactive(png_path: Option<&str>) -> anyhow::Result<()> {
 }
 
 pub fn render_scene_to_file<P: AsRef<std::path::Path>>(
-    png_path: Option<&str>,
+    png_path: &str,
     output_path: P,
     width: u32,
     height: u32,
 ) -> anyhow::Result<()> {
-    let mut state = pollster::block_on(State::new_headless(png_path, width, height))?;
+    let rects = generate_world_from_png(png_path)?;
+    let scene = Scene::new(4, rects);
+
+    let mut state = pollster::block_on(Game::new_headless(scene, width, height))?;
     pollster::block_on(state.render_to_file(output_path, width, height))?;
     Ok(())
 }
 
-pub fn run() -> anyhow::Result<()> {
-    run_interactive(None)
+pub fn run(world_png_path: &str) -> anyhow::Result<()> {
+    run_interactive(world_png_path)
 }
 
 #[cfg(target_arch = "wasm32")]

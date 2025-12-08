@@ -17,6 +17,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct RectangularPrism {
+    /// ! this seems sus - maybe one of the issues with WFC -> Rects
     /// position of top-front-left
     pub position: Point3<f32>,
     pub width: f32,

@@ -51,6 +51,7 @@ impl Mesh {
     }
 }
 
+#[allow(dead_code)]
 pub struct ObjectCollection {
     pub shape: Shape,
     pub object_data: Vec<ObjectData>,

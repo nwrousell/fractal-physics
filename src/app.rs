@@ -8,32 +8,29 @@ use winit::{
     window::Window,
 };
 
-use crate::state::State;
+use crate::{game::Game, scene::Scene};
 
 pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<State>>,
-    state: Option<State>,
-    png_path: Option<String>,
+    game: Option<Game>,
+    scene: Option<Scene>,
 }
 
 impl App {
-    pub fn new(
-        #[cfg(target_arch = "wasm32")] event_loop: &EventLoop<State>,
-        png_path: Option<String>,
-    ) -> Self {
+    pub fn new(#[cfg(target_arch = "wasm32")] event_loop: &EventLoop<State>, scene: Scene) -> Self {
         #[cfg(target_arch = "wasm32")]
         let proxy = Some(event_loop.create_proxy());
         Self {
-            state: None,
+            game: None,
             #[cfg(target_arch = "wasm32")]
             proxy,
-            png_path,
+            scene: Some(scene),
         }
     }
 }
 
-impl ApplicationHandler<State> for App {
+impl ApplicationHandler<Game> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
         let mut window_attributes = Window::default_attributes();
@@ -54,12 +51,13 @@ impl ApplicationHandler<State> for App {
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
-        let png_path = self.png_path.as_deref();
         #[cfg(not(target_arch = "wasm32"))]
         {
             // If we are not on web we can use pollster to
-            // await the
-            self.state = Some(pollster::block_on(State::new_with_png(window, png_path)).unwrap());
+            // await the future
+            self.game = Some(
+                pollster::block_on(Game::new_window(window, self.scene.take().unwrap())).unwrap(),
+            );
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -84,7 +82,7 @@ impl ApplicationHandler<State> for App {
     }
 
     #[allow(unused_mut)]
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, mut event: State) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, mut event: Game) {
         // This is where proxy.send_event() ends up
         #[cfg(target_arch = "wasm32")]
         {
@@ -94,7 +92,7 @@ impl ApplicationHandler<State> for App {
                 event.window.inner_size().height,
             );
         }
-        self.state = Some(event);
+        self.game = Some(event);
     }
 
     fn window_event(
@@ -103,7 +101,7 @@ impl ApplicationHandler<State> for App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let state = match &mut self.state {
+        let state = match &mut self.game {
             Some(canvas) => canvas,
             None => return,
         };

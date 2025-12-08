@@ -1,7 +1,7 @@
 mod common;
 
 use common::snapshot_image_bytes;
-use placeholder_name::run_wfc;
+use placeholder_name_lib::run_wfc;
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,7 +9,8 @@ use std::path::PathBuf;
 fn test_wfc_small_seed_1() {
     let output_dir = PathBuf::from("outputs/wfc");
     let output_path = output_dir.join("small_seed_1.png");
-    run_wfc(1, 20, &output_path, None).unwrap();
+    let tileset_path = "src/procgen/tilemaps/Knots/tileset.xml";
+    run_wfc(1, 20, &output_path, tileset_path).unwrap();
 
     let img_bytes = fs::read(&output_path).unwrap();
     snapshot_image_bytes(&img_bytes, "wfc_small_seed_1");
@@ -19,7 +20,8 @@ fn test_wfc_small_seed_1() {
 fn test_wfc_small_seed_42() {
     let output_dir = PathBuf::from("outputs/wfc");
     let output_path = output_dir.join("small_seed_42.png");
-    run_wfc(42, 20, &output_path, None).unwrap();
+    let tileset_path = "src/procgen/tilemaps/Knots/tileset.xml";
+    run_wfc(42, 20, &output_path, tileset_path).unwrap();
 
     let img_bytes = fs::read(&output_path).unwrap();
     snapshot_image_bytes(&img_bytes, "wfc_small_seed_42");
@@ -29,7 +31,8 @@ fn test_wfc_small_seed_42() {
 fn test_wfc_medium_seed_100() {
     let output_dir = PathBuf::from("outputs/wfc");
     let output_path = output_dir.join("medium_seed_100.png");
-    run_wfc(100, 40, &output_path, None).unwrap();
+    let tileset_path = "src/procgen/tilemaps/Knots/tileset.xml";
+    run_wfc(100, 40, &output_path, tileset_path).unwrap();
 
     let img_bytes = fs::read(&output_path).unwrap();
     snapshot_image_bytes(&img_bytes, "wfc_medium_seed_100");
@@ -39,7 +42,8 @@ fn test_wfc_medium_seed_100() {
 fn test_wfc_large_seed_999() {
     let output_dir = PathBuf::from("outputs/wfc");
     let output_path = output_dir.join("large_seed_999.png");
-    run_wfc(999, 60, &output_path, None).unwrap();
+    let tileset_path = "src/procgen/tilemaps/Knots/tileset.xml";
+    run_wfc(999, 60, &output_path, tileset_path).unwrap();
 
     let img_bytes = fs::read(&output_path).unwrap();
     snapshot_image_bytes(&img_bytes, "wfc_large_seed_999");
@@ -53,7 +57,7 @@ fn test_wfc_knots_seed_5() {
         5,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/Knots/tileset.xml"),
+        "src/procgen/tilemaps/Knots/tileset.xml",
     )
     .unwrap();
 
@@ -69,7 +73,7 @@ fn test_wfc_knots_seed_123() {
         123,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/Knots/tileset.xml"),
+        "src/procgen/tilemaps/Knots/tileset.xml",
     )
     .unwrap();
 
@@ -85,7 +89,7 @@ fn test_wfc_circuit_seed_7() {
         7,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/Circuit/tileset.xml"),
+        "src/procgen/tilemaps/Circuit/tileset.xml",
     )
     .unwrap();
 
@@ -101,7 +105,7 @@ fn test_wfc_circuit_seed_88() {
         88,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/Circuit/tileset.xml"),
+        "src/procgen/tilemaps/Circuit/tileset.xml",
     )
     .unwrap();
 
@@ -117,7 +121,7 @@ fn test_wfc_castle_seed_13() {
         13,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/Castle/tileset.xml"),
+        "src/procgen/tilemaps/Castle/tileset.xml",
     )
     .unwrap();
 
@@ -133,7 +137,7 @@ fn test_wfc_castle_seed_256() {
         256,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/Castle/tileset.xml"),
+        "src/procgen/tilemaps/Castle/tileset.xml",
     )
     .unwrap();
 
@@ -149,7 +153,7 @@ fn test_wfc_floorplan_seed_9() {
         9,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/FloorPlan/tileset.xml"),
+        "src/procgen/tilemaps/FloorPlan/tileset.xml",
     )
     .unwrap();
 
@@ -165,7 +169,7 @@ fn test_wfc_floorplan_seed_77() {
         77,
         20,
         &output_path,
-        Some("src/procgen/tilemaps/FloorPlan/tileset.xml"),
+        "src/procgen/tilemaps/FloorPlan/tileset.xml",
     )
     .unwrap();
 

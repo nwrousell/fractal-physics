@@ -1,6 +1,6 @@
 use anyhow::Error;
 use clap::{Parser, Subcommand};
-use placeholder_name::{render_rects_to_file, render_scene_to_file, run_interactive, run_wfc};
+use placeholder_name_lib::{render_rects_to_file, render_scene_to_file, run_interactive, run_wfc};
 
 #[derive(Parser)]
 #[command(name = "placeholder-name")]
@@ -13,25 +13,25 @@ struct Cli {
 enum Commands {
     /// Run interactive mode
     Interactive {
-        /// Optional PNG file to load from
-        #[arg(long)]
-        from: Option<String>,
+        /// PNG world file
+        #[arg(long, default_value = "default_world.png")]
+        from: String,
     },
     /// Render rectangles to file
     RenderRects {
         /// Output file path
         path: String,
-        /// Optional PNG file to load from
-        #[arg(long)]
-        from: Option<String>,
+        /// PNG world file
+        #[arg(long, default_value = "default_world.png")]
+        from: String,
     },
     /// Render scene
     RenderScene {
         /// Output file path
         path: String,
-        /// Optional PNG file to load from
-        #[arg(long)]
-        from: Option<String>,
+        /// PNG world file
+        #[arg(long, default_value = "default_world.png")]
+        from: String,
         /// Output image width (default: 1920)
         #[arg(long, default_value = "1920")]
         width: u32,
@@ -48,9 +48,9 @@ enum Commands {
         /// Width/height of WFC wave (default: 10)
         #[arg(short, long, default_value = "10")]
         n: usize,
-        /// Path to tileset XML file (default: src/procgen/tilemaps/Rooms/tileset.xml)
-        #[arg(long)]
-        tileset: Option<String>,
+        /// Path to tileset XML file
+        #[arg(long, default_value = "src/procgen/tilemaps/Rooms/tileset.xml")]
+        tileset: String,
     },
 }
 
@@ -59,10 +59,10 @@ fn main() -> Result<(), Error> {
 
     match args.command {
         Commands::Interactive { from } => {
-            run_interactive(from.as_deref())?;
+            run_interactive(from.as_str())?;
         }
         Commands::RenderRects { path, from } => {
-            render_rects_to_file(from.as_ref().map(|s| s.as_str()), &path)?;
+            render_rects_to_file(from.as_str(), &path)?;
         }
         Commands::RenderScene {
             path,
@@ -70,7 +70,7 @@ fn main() -> Result<(), Error> {
             width,
             height,
         } => {
-            render_scene_to_file(from.as_deref(), &path, width, height)?;
+            render_scene_to_file(from.as_str(), &path, width, height)?;
         }
         Commands::Wfc {
             path,
@@ -78,7 +78,7 @@ fn main() -> Result<(), Error> {
             n,
             tileset,
         } => {
-            run_wfc(seed, n, &path, tileset.as_deref())?;
+            run_wfc(seed, n, &path, &tileset)?;
         }
     }
 

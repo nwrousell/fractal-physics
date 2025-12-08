@@ -7,31 +7,26 @@ use crate::{
     buffer::Buffer,
     camera::{Camera, CameraConfig},
     postprocess::PostprocessState,
-    procgen::{generate_world, generate_world_from_png},
     scene::{Scene, Vertex},
 };
 
-pub struct State {
+pub struct Game {
     surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
     pub window: Option<Arc<Window>>,
+    postprocess_state: PostprocessState,
 
+    vertex_buffer: wgpu::Buffer,
     camera: Camera,
     scene: Scene,
-    postprocess_state: PostprocessState,
 }
 
-impl State {
-    pub async fn new_headless(
-        png_path: Option<&str>,
-        width: u32,
-        height: u32,
-    ) -> anyhow::Result<Self> {
+impl Game {
+    pub async fn new_headless(scene: Scene, width: u32, height: u32) -> anyhow::Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
@@ -60,10 +55,10 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        Ok(State::new(adapter, png_path, config, None, None).await?)
+        Ok(Game::new(adapter, scene, config, None, None).await?)
     }
 
-    pub async fn new_with_png(window: Arc<Window>, png_path: Option<&str>) -> anyhow::Result<Self> {
+    pub async fn new_window(window: Arc<Window>, scene: Scene) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -112,12 +107,12 @@ impl State {
         // in an Arc in the State struct, the window will outlive the State, making it safe
         // to extend the lifetime to 'static.
         let surface: wgpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
-        Ok(State::new(adapter, png_path, config, Some(window), Some(surface)).await?)
+        Ok(Game::new(adapter, scene, config, Some(window), Some(surface)).await?)
     }
 
     async fn new(
         adapter: wgpu::Adapter,
-        png_path: Option<&str>,
+        mut scene: Scene,
         config: wgpu::SurfaceConfiguration,
         window: Option<Arc<Window>>,
         surface: Option<wgpu::Surface<'static>>,
@@ -132,12 +127,7 @@ impl State {
                 trace: wgpu::Trace::Off,
             })
             .await?;
-        let rects = match png_path {
-            Some(path) => generate_world_from_png(path)?,
-            None => generate_world()?,
-        };
 
-        let mut scene = Scene::new(4, rects);
         scene.init_buffers(&device);
 
         let camera_config = CameraConfig {
@@ -178,7 +168,7 @@ impl State {
             label: Some("Normal Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         };
-        let render_pipeline = State::create_render_pipeline(
+        let render_pipeline = Game::create_render_pipeline(
             &device,
             &render_pipeline_layout,
             config.format,
