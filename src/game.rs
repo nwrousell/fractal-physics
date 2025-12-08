@@ -18,7 +18,9 @@ pub struct Game {
     is_surface_configured: bool,
     render_pipeline: wgpu::RenderPipeline,
     pub window: Option<Arc<Window>>,
+
     postprocess_state: PostprocessState,
+    do_postprocess: bool,
 
     vertex_buffer: wgpu::Buffer,
     camera: Camera,
@@ -26,7 +28,12 @@ pub struct Game {
 }
 
 impl Game {
-    pub async fn new_headless(scene: Scene, width: u32, height: u32) -> anyhow::Result<Self> {
+    pub async fn new_headless(
+        scene: Scene,
+        width: u32,
+        height: u32,
+        do_postprocess: bool,
+    ) -> anyhow::Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
@@ -55,10 +62,14 @@ impl Game {
             desired_maximum_frame_latency: 2,
         };
 
-        Ok(Game::new(adapter, scene, config, None, None).await?)
+        Ok(Game::new(adapter, scene, config, do_postprocess, None, None).await?)
     }
 
-    pub async fn new_window(window: Arc<Window>, scene: Scene) -> anyhow::Result<Self> {
+    pub async fn new_window(
+        window: Arc<Window>,
+        scene: Scene,
+        do_postprocess: bool,
+    ) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -107,13 +118,22 @@ impl Game {
         // in an Arc in the State struct, the window will outlive the State, making it safe
         // to extend the lifetime to 'static.
         let surface: wgpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
-        Ok(Game::new(adapter, scene, config, Some(window), Some(surface)).await?)
+        Ok(Game::new(
+            adapter,
+            scene,
+            config,
+            do_postprocess,
+            Some(window),
+            Some(surface),
+        )
+        .await?)
     }
 
     async fn new(
         adapter: wgpu::Adapter,
         mut scene: Scene,
         config: wgpu::SurfaceConfiguration,
+        do_postprocess: bool,
         window: Option<Arc<Window>>,
         surface: Option<wgpu::Surface<'static>>,
     ) -> anyhow::Result<Self> {
@@ -192,13 +212,14 @@ impl Game {
             config,
             is_surface_configured: false,
             render_pipeline,
-            vertex_buffer,
             window,
 
-            camera,
-
-            scene,
             postprocess_state,
+            do_postprocess,
+
+            vertex_buffer,
+            camera,
+            scene,
         })
     }
 
@@ -265,7 +286,7 @@ impl Game {
         }
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render_to_window(&mut self) -> Result<(), wgpu::SurfaceError> {
         // We can't render unless the surface is configured
         if !self.is_surface_configured {
             return Ok(());
@@ -295,11 +316,17 @@ impl Game {
                 label: Some("Render Encoder"),
             });
 
+        let first_view = if self.do_postprocess {
+            &self.postprocess_state.intermediate_texture_view
+        } else {
+            &view
+        };
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.postprocess_state.intermediate_texture_view,
+                    view: first_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -330,7 +357,7 @@ impl Game {
             }
         }
 
-        {
+        if self.do_postprocess {
             self.postprocess_state.render_pass(&mut encoder, &view);
         }
 

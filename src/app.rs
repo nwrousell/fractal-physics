@@ -15,10 +15,15 @@ pub struct App {
     proxy: Option<winit::event_loop::EventLoopProxy<State>>,
     game: Option<Game>,
     scene: Option<Scene>,
+    do_postprocess: bool,
 }
 
 impl App {
-    pub fn new(#[cfg(target_arch = "wasm32")] event_loop: &EventLoop<State>, scene: Scene) -> Self {
+    pub fn new(
+        #[cfg(target_arch = "wasm32")] event_loop: &EventLoop<State>,
+        scene: Scene,
+        do_postprocess: bool,
+    ) -> Self {
         #[cfg(target_arch = "wasm32")]
         let proxy = Some(event_loop.create_proxy());
         Self {
@@ -26,6 +31,7 @@ impl App {
             #[cfg(target_arch = "wasm32")]
             proxy,
             scene: Some(scene),
+            do_postprocess,
         }
     }
 }
@@ -56,7 +62,12 @@ impl ApplicationHandler<Game> for App {
             // If we are not on web we can use pollster to
             // await the future
             self.game = Some(
-                pollster::block_on(Game::new_window(window, self.scene.take().unwrap())).unwrap(),
+                pollster::block_on(Game::new_window(
+                    window,
+                    self.scene.take().unwrap(),
+                    self.do_postprocess,
+                ))
+                .unwrap(),
             );
         }
 
@@ -111,7 +122,7 @@ impl ApplicationHandler<Game> for App {
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
                 state.update();
-                match state.render() {
+                match state.render_to_window() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {

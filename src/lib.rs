@@ -82,7 +82,7 @@ pub fn run_wfc<P: AsRef<std::path::Path>>(
     Ok(())
 }
 
-pub fn run_interactive(world_png_path: &str) -> anyhow::Result<()> {
+pub fn run_interactive(world_png_path: &str, do_postprocess: bool) -> anyhow::Result<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
@@ -100,6 +100,7 @@ pub fn run_interactive(world_png_path: &str) -> anyhow::Result<()> {
         #[cfg(target_arch = "wasm32")]
         &event_loop,
         scene,
+        do_postprocess,
     );
     event_loop.run_app(&mut app)?;
 
@@ -111,17 +112,14 @@ pub fn render_scene_to_file<P: AsRef<std::path::Path>>(
     output_path: P,
     width: u32,
     height: u32,
+    do_postprocess: bool,
 ) -> anyhow::Result<()> {
     let rects = generate_world_from_png(png_path)?;
     let scene = Scene::new(4, rects);
 
-    let mut state = pollster::block_on(Game::new_headless(scene, width, height))?;
+    let mut state = pollster::block_on(Game::new_headless(scene, width, height, do_postprocess))?;
     pollster::block_on(state.render_to_file(output_path, width, height))?;
     Ok(())
-}
-
-pub fn run(world_png_path: &str) -> anyhow::Result<()> {
-    run_interactive(world_png_path)
 }
 
 #[cfg(target_arch = "wasm32")]

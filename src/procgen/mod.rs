@@ -176,7 +176,7 @@ fn bitmap_to_rects(bitmap: Bitmap) -> Vec<RectangularPrism> {
             Point3::new(top_left.0 as f32, top_left.1 as f32, 0f32),
             (top_right.0 - top_left.0 + 1) as f32,
             (bottom - top_left.1 + 1) as f32,
-            1f32,
+            5.0,
         ));
 
         // continue from top-right

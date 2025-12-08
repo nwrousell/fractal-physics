@@ -62,7 +62,10 @@ impl Scene {
 
         let object_collections = vec![ObjectCollection::new(Shape::Cube, cubes, cube_mesh)];
 
-        let lights = Lights::new(vec![LightUniform::new([2.0, 2.0, 2.0], [1.0, 1.0, 1.0])]);
+        let lights = Lights::new(vec![LightUniform::new(
+            [30.0, 30.0, 50000.0],
+            [1.0, 1.0, 1.0],
+        )]);
 
         Self {
             object_collections,

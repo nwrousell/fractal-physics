@@ -37,7 +37,7 @@ fn vs_main(
     let normal_matrix = object_data[instance_idx].normal_matrix;
     out.tex_coords = vertex.tex_coords;
     out.clip_position = camera.view_proj * model * vec4<f32>(vertex.position, 1.0);
-    out.normal = normal_matrix * vertex.normal;
+    out.normal = normalize(normal_matrix * vertex.normal);
 
     return out;
 }
@@ -55,7 +55,7 @@ var<uniform> lights: array<Light, 8>;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let object_color = vec4<f32>(0.1, 0.1, 0.1, 1.0);
+    let object_color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
 
     // ambient
     let ambient_strength = 0.2;
@@ -66,11 +66,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var i = 0u; i < 8u; i++) {
         if (lights[i].used != 0u) {
             let light = lights[i];
-            let direction_to_light = light.position - in.clip_position.xyz;
+
+            let distance_to_light = length(light.position - in.clip_position.xyz);
+            // let att = min(1, 1/(0.8 + distance_to_light * 0.002 + distance_to_light*distance_to_light * 0.0));
+            let att = 1.0;
+
+            let direction_to_light = normalize(light.position - in.clip_position.xyz);
 
             // diffuse
-            let lambert_factor = max(0.0, dot(normalize(direction_to_light), in.normal));
-            result += vec4<f32>(light.color, 1.0) * lambert_factor * diffuse_strength;
+            let lambert_factor = max(0.0, dot(direction_to_light, in.normal));
+            result += vec4<f32>(light.color, 1.0) * lambert_factor * diffuse_strength * att;
 
             // specular
             // TODO

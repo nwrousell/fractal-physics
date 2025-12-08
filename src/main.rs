@@ -16,6 +16,10 @@ enum Commands {
         /// PNG world file
         #[arg(long, default_value = "default_world.png")]
         from: String,
+
+        /// disables postprocessing
+        #[arg(long, default_value_t = false)]
+        dont_postprocess: bool,
     },
     /// Render rectangles to file
     RenderRects {
@@ -38,6 +42,10 @@ enum Commands {
         /// Output image height (default: 1080)
         #[arg(long, default_value = "1080")]
         height: u32,
+
+        /// disables postprocessing
+        #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
+        dont_postprocess: bool,
     },
     /// Run WFC and save to file
     Wfc {
@@ -58,8 +66,11 @@ fn main() -> Result<(), Error> {
     let args = Cli::parse();
 
     match args.command {
-        Commands::Interactive { from } => {
-            run_interactive(from.as_str())?;
+        Commands::Interactive {
+            from,
+            dont_postprocess,
+        } => {
+            run_interactive(from.as_str(), !dont_postprocess)?;
         }
         Commands::RenderRects { path, from } => {
             render_rects_to_file(from.as_str(), &path)?;
@@ -69,8 +80,9 @@ fn main() -> Result<(), Error> {
             from,
             width,
             height,
+            dont_postprocess,
         } => {
-            render_scene_to_file(from.as_str(), &path, width, height)?;
+            render_scene_to_file(from.as_str(), &path, width, height, !dont_postprocess)?;
         }
         Commands::Wfc {
             path,
