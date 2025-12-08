@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use wgpu::util::DeviceExt;
-use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+use winit::{
+    dpi::PhysicalPosition, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window,
+};
 
 use crate::{
     buffer::Buffer,
@@ -344,9 +346,9 @@ impl Game {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
+                            r: 0.525,
+                            g: 0.812,
+                            b: 0.977,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -394,6 +396,14 @@ impl Game {
         } else {
             self.camera.handle_key(code, is_pressed);
         }
+    }
+
+    pub fn handle_mouse_move(&mut self, pos: PhysicalPosition<f64>) {
+        self.camera.handle_mouse_move(pos.x, pos.y);
+    }
+
+    pub fn handle_mouse_click(&mut self, pressed: bool) {
+        self.camera.handle_mouse_click(pressed);
     }
 
     pub fn update(&mut self) {

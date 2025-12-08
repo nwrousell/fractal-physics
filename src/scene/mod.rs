@@ -4,6 +4,7 @@ mod tessellate;
 mod vertex;
 
 use cgmath::{EuclideanSpace, Point3};
+use rand::prelude::*;
 use tessellate::Cube;
 pub use vertex::Vertex;
 
@@ -58,9 +59,17 @@ impl Scene {
         Cube::tessellate(&mut vertices, tessellation_param_1);
         let cube_mesh = Mesh::new(0, vertices.len().try_into().unwrap());
 
+        let mut rng = rand::rng();
+
         let mut cubes = Vec::new();
         for rect in rects {
-            cubes.push(ObjectData::new(rect.to_ctm()));
+            let color = [
+                rng.random_range(0.0..1.0),
+                rng.random_range(0.0..1.0),
+                rng.random_range(0.0..1.0),
+                1.0,
+            ];
+            cubes.push(ObjectData::new(rect.to_ctm(), color));
         }
 
         let object_collections = vec![ObjectCollection::new(Shape::Cube, cubes, cube_mesh)];

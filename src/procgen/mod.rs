@@ -125,7 +125,7 @@ fn bitmap_to_rects(bitmap: &Bitmap) -> Vec<RectangularPrism> {
         for x in 0..bitmap.width {
             if bitmap.get(x, y) {
                 let voxel =
-                    RectangularPrism::new(Point3::new(x as f32, y as f32, 0.0), 1.0, 1.0, 1.0);
+                    RectangularPrism::new(Point3::new(x as f32, y as f32, 0.0), 1.0, 1.0, 5.0);
                 rects.push(voxel);
             }
         }

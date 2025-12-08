@@ -62,7 +62,7 @@ impl Cube {
 
     fn insert_vertex(vertices: &mut Vec<Vertex>, point: Point3<f32>, normal: Vector3<f32>) {
         vertices.push(Vertex::new(
-            point.x, point.y, point.z, normal.x, normal.y, normal.z, 0f32, 0f32,
+            point.x, point.y, point.z, normal.x, normal.y, normal.z,
         ));
     }
 

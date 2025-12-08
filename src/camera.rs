@@ -68,6 +68,14 @@ impl Camera {
         self.controller.handle_key(code, is_pressed)
     }
 
+    pub fn handle_mouse_click(&mut self, pressed: bool) {
+        self.controller.handle_mouse_click(pressed);
+    }
+
+    pub fn handle_mouse_move(&mut self, x: f64, y: f64) {
+        self.controller.handle_mouse_move(x, y);
+    }
+
     pub fn update(&mut self) {
         use cgmath::InnerSpace;
         let forward = self.config.target - self.config.eye;
@@ -105,6 +113,38 @@ impl Camera {
         if self.controller.is_down_pressed {
             self.config.eye -= self.config.up * self.controller.speed;
             self.config.target -= self.config.up * self.controller.speed;
+        }
+
+        // Mouse rotation
+        let (dx, dy) = self.controller.mouse_delta;
+        if dx != 0.0 || dy != 0.0 {
+            use cgmath::{Angle, InnerSpace as _, Matrix3, Rad};
+
+            let forward = self.config.target - self.config.eye;
+            let forward_mag = forward.magnitude();
+
+            // Yaw rotation (horizontal mouse movement rotates around up axis)
+            let yaw_angle = Rad(-dx * self.controller.sensitivity);
+            let yaw_rotation = Matrix3::from_axis_angle(self.config.up, yaw_angle);
+
+            // Apply yaw to forward direction
+            let mut new_forward = yaw_rotation * forward;
+
+            // Pitch rotation (vertical mouse movement rotates around right axis)
+            let right = new_forward.normalize().cross(self.config.up).normalize();
+            let pitch_angle = Rad(-dy * self.controller.sensitivity);
+            let pitch_rotation = Matrix3::from_axis_angle(right, pitch_angle);
+
+            new_forward = pitch_rotation * new_forward;
+
+            // Prevent flipping by clamping the pitch
+            let up_dot = new_forward.normalize().dot(self.config.up).abs();
+            if up_dot < 0.99 {
+                self.config.target = self.config.eye + new_forward.normalize() * forward_mag;
+            }
+
+            // Reset mouse delta
+            self.controller.mouse_delta = (0.0, 0.0);
         }
 
         self.uniform.update_view_proj(&self.config);
@@ -183,24 +223,49 @@ impl CameraConfig {
 
 pub struct CameraController {
     pub speed: f32,
+    pub sensitivity: f32,
     pub is_forward_pressed: bool,
     pub is_backward_pressed: bool,
     pub is_left_pressed: bool,
     pub is_right_pressed: bool,
     pub is_up_pressed: bool,
     pub is_down_pressed: bool,
+    pub is_mouse_pressed: bool,
+    pub prev_mouse_position: Option<(f64, f64)>,
+    pub mouse_delta: (f32, f32),
 }
 
 impl CameraController {
     pub fn new(speed: f32) -> Self {
         Self {
             speed,
+            sensitivity: 0.002,
             is_forward_pressed: false,
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
             is_up_pressed: false,
             is_down_pressed: false,
+            is_mouse_pressed: false,
+            prev_mouse_position: None,
+            mouse_delta: (0.0, 0.0),
+        }
+    }
+
+    pub fn handle_mouse_click(&mut self, pressed: bool) {
+        self.is_mouse_pressed = pressed;
+        if !pressed {
+            self.prev_mouse_position = None;
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, x: f64, y: f64) {
+        if self.is_mouse_pressed {
+            if let Some((prev_x, prev_y)) = self.prev_mouse_position {
+                self.mouse_delta.0 += (x - prev_x) as f32;
+                self.mouse_delta.1 += (y - prev_y) as f32;
+            }
+            self.prev_mouse_position = Some((x, y));
         }
     }
 

@@ -15,16 +15,16 @@ pub enum Shape {
 pub struct ObjectData {
     pub ctm: [[f32; 4]; 4],
     pub normal_matrix: [[f32; 4]; 3],
+    pub color: [f32; 4],
 }
 
 impl ObjectData {
-    pub fn new(ctm: cgmath::Matrix4<f32>) -> Self {
+    pub fn new(ctm: cgmath::Matrix4<f32>, color: [f32; 4]) -> Self {
         let normal_matrix =
             cgmath::Matrix3::from_cols(ctm.x.truncate(), ctm.y.truncate(), ctm.z.truncate())
                 .transpose()
                 .invert()
                 .unwrap();
-        // TODO: fix ^
 
         let normal_matrix_padded = [
             [normal_matrix.x.x, normal_matrix.x.y, normal_matrix.x.z, 0.0],
@@ -35,6 +35,7 @@ impl ObjectData {
         ObjectData {
             ctm: ctm.into(),
             normal_matrix: normal_matrix_padded.into(),
+            color,
         }
     }
 }

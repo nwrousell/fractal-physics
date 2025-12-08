@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use winit::{
     application::ApplicationHandler,
-    event::{KeyEvent, WindowEvent},
+    event::{ElementState, KeyEvent, MouseButton, WindowEvent},
     event_loop::ActiveEventLoop,
     keyboard::PhysicalKey,
     window::Window,
@@ -112,24 +112,24 @@ impl ApplicationHandler<Game> for App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let state = match &mut self.game {
+        let game = match &mut self.game {
             Some(canvas) => canvas,
             None => return,
         };
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => state.resize(size.width, size.height),
+            WindowEvent::Resized(size) => game.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                state.update();
-                match state.render_to_window() {
+                game.update();
+                match game.render_to_window() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        match &state.window {
+                        match &game.window {
                             Some(window) => {
                                 let size = window.inner_size();
-                                state.resize(size.width, size.height);
+                                game.resize(size.width, size.height);
                             }
                             None => unreachable!(),
                         }
@@ -147,7 +147,13 @@ impl ApplicationHandler<Game> for App {
                         ..
                     },
                 ..
-            } => state.handle_key(event_loop, code, key_state.is_pressed()),
+            } => game.handle_key(event_loop, code, key_state.is_pressed()),
+            WindowEvent::CursorMoved { position, .. } => game.handle_mouse_move(position),
+            WindowEvent::MouseInput { state, button, .. } => {
+                if matches!(button, MouseButton::Left) {
+                    game.handle_mouse_click(state.is_pressed());
+                }
+            }
             _ => {}
         }
     }
