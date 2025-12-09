@@ -3,9 +3,10 @@ mod objects;
 mod tessellate;
 mod vertex;
 
+use std::collections::HashSet;
+
 use cgmath::{EuclideanSpace, Point3};
-use rand::prelude::*;
-use tessellate::Cube;
+use tessellate::Face;
 pub use vertex::Vertex;
 
 use crate::{
@@ -16,35 +17,104 @@ use crate::{
     },
 };
 
-#[derive(Debug)]
-pub struct RectangularPrism {
-    /// ! this seems sus - maybe one of the issues with WFC -> Rects
-    /// position of top-front-left
-    pub position: Point3<f32>,
+/// A voxel position in the grid (integer coordinates)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VoxelPos {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+impl VoxelPos {
+    pub fn new(x: i32, y: i32, z: i32) -> Self {
+        Self { x, y, z }
+    }
+
+    /// Get the neighbor position in the direction of the given face
+    pub fn neighbor(&self, face: Face) -> VoxelPos {
+        match face {
+            Face::Front => VoxelPos::new(self.x, self.y, self.z + 1),
+            Face::Back => VoxelPos::new(self.x, self.y, self.z - 1),
+            Face::Top => VoxelPos::new(self.x, self.y + 1, self.z),
+            Face::Bottom => VoxelPos::new(self.x, self.y - 1, self.z),
+            Face::Right => VoxelPos::new(self.x + 1, self.y, self.z),
+            Face::Left => VoxelPos::new(self.x - 1, self.y, self.z),
+        }
+    }
+}
+
+/// A voxel with position and color
+#[derive(Debug, Clone)]
+pub struct Voxel {
+    pub pos: VoxelPos,
     pub width: f32,
     pub height: f32,
     pub depth: f32,
+    pub color: [f32; 4],
 }
 
-impl RectangularPrism {
-    pub fn new(position: Point3<f32>, width: f32, height: f32, depth: f32) -> Self {
-        RectangularPrism {
-            position,
+impl Voxel {
+    pub fn new(pos: VoxelPos, width: f32, height: f32, depth: f32, color: [f32; 4]) -> Self {
+        Self {
+            pos,
             width,
             height,
             depth,
+            color,
         }
     }
 
     pub fn to_ctm(&self) -> cgmath::Matrix4<f32> {
         let scale = cgmath::Matrix4::from_nonuniform_scale(self.width, self.height, self.depth);
-
-        // offset so that position describes top-front-left instead of center
-        let offset = cgmath::Vector3::new(-0.5 * self.width, -0.5 * self.height, -0.5 * self.depth);
-
-        let translation = cgmath::Matrix4::from_translation(self.position.to_vec() + offset);
+        let translation = cgmath::Matrix4::from_translation(cgmath::Vector3::new(
+            self.pos.x as f32,
+            self.pos.y as f32,
+            self.pos.z as f32,
+        ));
         translation * scale
     }
+}
+
+#[derive(Debug)]
+pub struct RectangularPrism {
+    /// position of the center of the prism
+    pub position: Point3<f32>,
+    pub width: f32,
+    pub height: f32,
+    pub depth: f32,
+    pub color: [f32; 4],
+}
+
+impl RectangularPrism {
+    pub fn new(
+        position: Point3<f32>,
+        width: f32,
+        height: f32,
+        depth: f32,
+        color: [f32; 4],
+    ) -> Self {
+        RectangularPrism {
+            position,
+            width,
+            height,
+            depth,
+            color,
+        }
+    }
+
+    pub fn to_ctm(&self) -> cgmath::Matrix4<f32> {
+        let scale = cgmath::Matrix4::from_nonuniform_scale(self.width, self.height, self.depth);
+        let translation = cgmath::Matrix4::from_translation(self.position.to_vec());
+        translation * scale
+    }
+}
+
+/// Input data for scene generation
+pub struct SceneInput {
+    /// Voxels that should have face culling applied
+    pub voxels: Vec<Voxel>,
+    /// Rectangular prisms that render all faces (e.g., walls)
+    pub prisms: Vec<RectangularPrism>,
 }
 
 pub struct Scene {
@@ -54,25 +124,57 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn new(tessellation_param_1: u32, rects: Vec<RectangularPrism>) -> Self {
+    pub fn new(tessellation_param: u32, input: SceneInput) -> Self {
         let mut vertices = Vec::new();
-        Cube::tessellate(&mut vertices, tessellation_param_1);
-        let cube_mesh = Mesh::new(0, vertices.len().try_into().unwrap());
 
-        let mut rng = rand::rng();
-
-        let mut cubes = Vec::new();
-        for rect in rects {
-            let color = [
-                rng.random_range(0.0..1.0),
-                rng.random_range(0.0..1.0),
-                rng.random_range(0.0..1.0),
-                1.0,
-            ];
-            cubes.push(ObjectData::new(rect.to_ctm(), color));
+        // Tessellate each face type and record its mesh
+        let mut face_meshes: Vec<Mesh> = Vec::new();
+        for face in Face::ALL {
+            let start = vertices.len() as u32;
+            face.tessellate(&mut vertices, tessellation_param);
+            let count = vertices.len() as u32 - start;
+            face_meshes.push(Mesh::new(start, count));
         }
 
-        let object_collections = vec![ObjectCollection::new(Shape::Cube, cubes, cube_mesh)];
+        // Build occupancy set from voxels for face culling
+        let occupied: HashSet<VoxelPos> = input.voxels.iter().map(|v| v.pos).collect();
+
+        // Generate face instances for each face type
+        let mut face_instances: [Vec<ObjectData>; 6] = Default::default();
+
+        for voxel in &input.voxels {
+            let ctm = voxel.to_ctm();
+            let color = voxel.color;
+
+            for (i, face) in Face::ALL.iter().enumerate() {
+                let neighbor = voxel.pos.neighbor(*face);
+                // Only create face instance if neighbor is empty
+                if !occupied.contains(&neighbor) {
+                    face_instances[i].push(ObjectData::new(ctm, color));
+                }
+            }
+        }
+
+        // Add all prism faces (no culling for walls etc.)
+        for prism in &input.prisms {
+            let ctm = prism.to_ctm();
+            let color = prism.color;
+            for i in 0..6 {
+                face_instances[i].push(ObjectData::new(ctm, color));
+            }
+        }
+
+        // Create object collections for each face type
+        let mut object_collections = Vec::new();
+        for (i, instances) in face_instances.into_iter().enumerate() {
+            if !instances.is_empty() {
+                object_collections.push(ObjectCollection::new(
+                    Shape::Face(Face::ALL[i]),
+                    instances,
+                    face_meshes[i].clone(),
+                ));
+            }
+        }
 
         let lights = Lights::new(vec![LightUniform::new(
             [30.0, 30.0, 50000.0],

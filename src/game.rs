@@ -298,6 +298,13 @@ impl Game {
             }
             self.depth_texture =
                 Texture::create_depth_texture(&self.device, &self.config, "Depth Texture");
+            let texture_extent = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+            self.postprocess_texture =
+                PostprocessTexture::new(&self.device, texture_extent, self.config.format);
             self.is_surface_configured = true;
         }
     }
@@ -346,9 +353,13 @@ impl Game {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.525,
-                            g: 0.812,
-                            b: 0.977,
+                            // r: 0.525,
+                            // g: 0.812,
+                            // b: 0.977,
+                            // a: 1.0,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

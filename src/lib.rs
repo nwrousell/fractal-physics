@@ -34,8 +34,8 @@ pub fn run_wfc<P: AsRef<std::path::Path>>(
 }
 
 pub fn parse_and_render_rects(world_path: &str, out_path: &str) -> Result<()> {
-    let (rects, width, height) = generate_world_from_png(world_path)?;
-    render_rects_to_file(rects, width, height, out_path)
+    let (input, width, height) = generate_world_from_png(world_path)?;
+    render_rects_to_file(input, width, height, out_path)
 }
 
 pub fn run_interactive(world_png_path: &str, do_postprocess: bool) -> anyhow::Result<()> {
@@ -50,8 +50,8 @@ pub fn run_interactive(world_png_path: &str, do_postprocess: bool) -> anyhow::Re
 
     let event_loop: EventLoop<crate::game::Game> = EventLoop::with_user_event().build()?;
 
-    let (rects, _, _) = generate_world_from_png(world_png_path)?;
-    let scene = Scene::new(4, rects);
+    let (input, _, _) = generate_world_from_png(world_png_path)?;
+    let scene = Scene::new(4, input);
 
     let mut app = App::new(
         #[cfg(target_arch = "wasm32")]
@@ -71,8 +71,8 @@ pub fn render_scene_to_file<P: AsRef<std::path::Path>>(
     height: u32,
     do_postprocess: bool,
 ) -> anyhow::Result<()> {
-    let (rects, _, _) = generate_world_from_png(png_path)?;
-    let scene = Scene::new(4, rects);
+    let (input, _, _) = generate_world_from_png(png_path)?;
+    let scene = Scene::new(4, input);
 
     let mut state = pollster::block_on(Game::new_headless(scene, width, height, do_postprocess))?;
     pollster::block_on(state.render_to_file(output_path, width, height))?;

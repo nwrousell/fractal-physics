@@ -3,11 +3,12 @@ use std::ops::Range;
 use cgmath::{Matrix, SquareMatrix};
 use wgpu::util::DeviceExt;
 
+use super::tessellate::Face;
 use crate::buffer::Buffer;
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub enum Shape {
-    Cube,
+    Face(Face),
 }
 
 #[repr(C)]
@@ -40,6 +41,7 @@ impl ObjectData {
     }
 }
 
+#[derive(Clone)]
 pub struct Mesh {
     pub vertex_offset: u32,
     pub num_vertices: u32,

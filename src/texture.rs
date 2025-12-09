@@ -1,5 +1,6 @@
 use anyhow::Result;
 use image::{GenericImageView, ImageBuffer, Rgba};
+use wgpu::util::DeviceExt;
 
 pub struct Texture {
     #[allow(unused)]
@@ -79,20 +80,37 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
-        let mut tex = Texture::new(device, size, label);
+        let mut tex = Texture::new(
+            device,
+            size,
+            label,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            false,
+        );
         tex.write(queue, rgba);
         Ok(tex)
     }
 
-    pub fn new(device: &wgpu::Device, size: wgpu::Extent3d, label: Option<&str>) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        size: wgpu::Extent3d,
+        label: Option<&str>,
+        format: wgpu::TextureFormat,
+        render_attachment: bool,
+    ) -> Self {
+        let mut usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
+        if render_attachment {
+            usage |= wgpu::TextureUsages::RENDER_ATTACHMENT;
+        }
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            format,
+            usage,
             view_formats: &[],
         });
 
@@ -133,16 +151,40 @@ impl Texture {
     }
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ResolutionUniform {
+    pub width: f32,
+    pub height: f32,
+}
+
 pub struct PostprocessTexture {
     pub texture: Texture,
 
     bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
+    resolution_buffer: wgpu::Buffer,
 }
 
 impl PostprocessTexture {
     pub fn new(device: &wgpu::Device, size: wgpu::Extent3d, format: wgpu::TextureFormat) -> Self {
-        let texture = Texture::new(device, size, Some("Postprocessing Intermediate Texture"));
+        let texture = Texture::new(
+            device,
+            size,
+            Some("Postprocessing Intermediate Texture"),
+            format,
+            true,
+        );
+
+        let resolution_uniform = ResolutionUniform {
+            width: size.width as f32,
+            height: size.height as f32,
+        };
+        let resolution_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Resolution Buffer"),
+            contents: bytemuck::cast_slice(&[resolution_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
@@ -162,6 +204,16 @@ impl PostprocessTexture {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
             label: Some("intermediate_texture_bind_group_layout"),
         });
@@ -176,6 +228,10 @@ impl PostprocessTexture {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: resolution_buffer.as_entire_binding(),
                 },
             ],
             label: Some("intermediate_texture_bind_group"),
@@ -234,6 +290,7 @@ impl PostprocessTexture {
             texture,
             bind_group,
             render_pipeline,
+            resolution_buffer,
         }
     }
 

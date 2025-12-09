@@ -1,10 +1,12 @@
+use std::collections::VecDeque;
 use std::path::Path;
 
-use crate::scene::RectangularPrism;
+use crate::scene::{RectangularPrism, SceneInput, Voxel, VoxelPos};
 
 use anyhow::Error;
 use cgmath::Point3;
 use image::{DynamicImage, GenericImageView};
+use rand::Rng;
 
 mod parse;
 mod types;
@@ -44,188 +46,160 @@ impl Bitmap {
     fn get(&self, x: usize, y: usize) -> bool {
         self.bits[y * self.width + x]
     }
-
-    fn next(&self, x: usize, y: usize) -> Option<(usize, usize)> {
-        if x < self.width - 1 {
-            Some((x + 1, y))
-        } else {
-            if y < self.height - 1 {
-                Some((0, y + 1))
-            } else {
-                None
-            }
-        }
-    }
-
-    fn first_black(&self, x: usize, y: usize) -> Option<(usize, usize)> {
-        let mut x = x;
-        let mut y = y;
-
-        loop {
-            let is_black = self.get(x, y);
-            if is_black {
-                return Some((x, y));
-            } else {
-                match self.next(x, y) {
-                    Some((next_x, next_y)) => {
-                        x = next_x;
-                        y = next_y;
-                    }
-                    None => {
-                        return None;
-                    }
-                }
-            }
-        }
-    }
-
-    fn white_or_end(&self, x: usize, y: usize) -> Option<(usize, usize)> {
-        let mut x = x;
-        let mut y = y;
-        loop {
-            let is_black = self.get(x, y);
-            let is_last_in_row = x == self.width - 1;
-            if !is_black || is_last_in_row {
-                return Some((x, y));
-            } else {
-                match self.next(x, y) {
-                    Some((next_x, next_y)) => {
-                        x = next_x;
-                        y = next_y;
-                    }
-                    None => {
-                        return None;
-                    }
-                }
-            }
-        }
-    }
-
-    fn bottom(&self, left: usize, right: usize, top: usize) -> usize {
-        let mut y = top + 1;
-        loop {
-            if y == self.height {
-                return y - 1;
-            }
-            let row = &self.bits[(y * self.width + left)..(y * self.width + right)];
-            let all_black = row.iter().all(|b| *b);
-            if all_black {
-                y = y + 1;
-            } else {
-                return y - 1;
-            }
-        }
-    }
 }
 
-fn bitmap_to_rects(bitmap: &Bitmap) -> Vec<RectangularPrism> {
-    let mut rects: Vec<RectangularPrism> = Vec::new();
+/// Flood-fill to find connected components and assign labels
+fn label_connected_components(bitmap: &Bitmap) -> Vec<i32> {
+    let mut labels = vec![-1i32; bitmap.width * bitmap.height];
+    let mut current_label = 0;
 
+    for start_y in 0..bitmap.height {
+        for start_x in 0..bitmap.width {
+            let idx = start_y * bitmap.width + start_x;
+            // Skip if not black or already labeled
+            if !bitmap.get(start_x, start_y) || labels[idx] >= 0 {
+                continue;
+            }
+
+            // BFS flood-fill
+            let mut queue = VecDeque::new();
+            queue.push_back((start_x, start_y));
+            labels[idx] = current_label;
+
+            while let Some((x, y)) = queue.pop_front() {
+                // Check 4-connected neighbors
+                let neighbors = [
+                    (x.wrapping_sub(1), y),
+                    (x + 1, y),
+                    (x, y.wrapping_sub(1)),
+                    (x, y + 1),
+                ];
+
+                for (nx, ny) in neighbors {
+                    if nx < bitmap.width && ny < bitmap.height {
+                        let nidx = ny * bitmap.width + nx;
+                        if bitmap.get(nx, ny) && labels[nidx] < 0 {
+                            labels[nidx] = current_label;
+                            queue.push_back((nx, ny));
+                        }
+                    }
+                }
+            }
+
+            current_label += 1;
+        }
+    }
+
+    labels
+}
+
+fn bitmap_to_scene_input(bitmap: &Bitmap) -> SceneInput {
+    let depth = 5.0;
+    let wall_thickness = 1.0;
+
+    // Get connected component labels
+    let labels = label_connected_components(bitmap);
+
+    // Generate a color for each component
+    let max_label = labels.iter().max().copied().unwrap_or(-1);
+    let mut rng = rand::rng();
+    let mut component_colors: Vec<[f32; 4]> = Vec::new();
+    for _ in 0..=max_label {
+        component_colors.push([
+            rng.random_range(0.0..1.0),
+            rng.random_range(0.0..1.0),
+            rng.random_range(0.0..1.0),
+            1.0,
+        ]);
+    }
+
+    // Create voxels for the main content (these will have face culling)
+    let mut voxels = Vec::new();
     for y in 0..bitmap.height {
         for x in 0..bitmap.width {
-            if bitmap.get(x, y) {
+            let idx = y * bitmap.width + x;
+            let label = labels[idx];
+            if label >= 0 {
+                let color = component_colors[label as usize];
                 let voxel =
-                    RectangularPrism::new(Point3::new(x as f32, y as f32, 0.0), 1.0, 1.0, 5.0);
-                rects.push(voxel);
+                    Voxel::new(VoxelPos::new(x as i32, y as i32, 0), 1.0, 1.0, depth, color);
+                voxels.push(voxel);
             }
         }
     }
 
-    rects
+    // Create walls as prisms (no face culling - they render all faces)
+    let mut prisms = Vec::new();
+    let w = bitmap.width as f32;
+    let h = bitmap.height as f32;
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+    let half_t = wall_thickness / 2.0;
+    let wall_color = [0.5, 0.5, 0.5, 1.0];
 
-    // let mut x = 0;
-    // let mut y = 0;
+    // Back wall (behind everything on z-axis)
+    // prisms.push(RectangularPrism::new(
+    //     Point3::new(half_w, half_h, 1.0),
+    //     w + 2.0 * wall_thickness,
+    //     h + 2.0 * wall_thickness,
+    //     wall_thickness,
+    //     wall_color,
+    // ));
 
-    // loop {
-    //     let top_left = loop {
-    //         match bitmap.first_black(x, y) {
-    //             Some((first_x, first_y)) => {
-    //                 // check if tl is included in rects
-    //                 let first_xf = first_x as f32;
-    //                 let first_yf = first_y as f32;
-    //                 let mut rect_in = None;
-    //                 for rect in &rects {
-    //                     if first_xf >= rect.position.x
-    //                         && first_xf < rect.position.x + rect.width
-    //                         && first_yf >= rect.position.y
-    //                         && first_yf < rect.position.y + rect.height
-    //                     {
-    //                         rect_in = Some(rect);
-    //                         break;
-    //                     }
-    //                 }
+    // // Left wall
+    // prisms.push(RectangularPrism::new(
+    //     Point3::new(-half_t, half_h, 0.0),
+    //     wall_thickness,
+    //     h + 2.0 * wall_thickness,
+    //     depth,
+    //     wall_color,
+    // ));
 
-    //                 match rect_in {
-    //                     Some(r) => {
-    //                         x = (r.position.x + r.width) as usize;
-    //                         y = first_y;
-    //                         if x >= bitmap.width {
-    //                             x = 0;
-    //                             y += 1;
-    //                         }
-    //                     }
-    //                     None => {
-    //                         break (first_x, first_y);
-    //                     }
-    //                 }
-    //             }
-    //             None => {
-    //                 return rects;
-    //             }
-    //         }
-    //     };
+    // // Right wall
+    // prisms.push(RectangularPrism::new(
+    //     Point3::new(w + half_t, half_h, 0.0),
+    //     wall_thickness,
+    //     h + 2.0 * wall_thickness,
+    //     depth,
+    //     wall_color,
+    // ));
 
-    //     let top_right = match bitmap.white_or_end(top_left.0, top_left.1) {
-    //         Some(tr) => tr,
-    //         None => unreachable!("couldn't find top right of rectangle"),
-    //     };
+    // // Top wall (y = -1)
+    // prisms.push(RectangularPrism::new(
+    //     Point3::new(half_w, -half_t, 0.0),
+    //     w + 2.0 * wall_thickness,
+    //     wall_thickness,
+    //     depth,
+    //     wall_color,
+    // ));
 
-    //     assert!(top_left.1 == top_right.1);
+    // // Bottom wall (y = h)
+    // prisms.push(RectangularPrism::new(
+    //     Point3::new(half_w, h + half_t, 0.0),
+    //     w + 2.0 * wall_thickness,
+    //     wall_thickness,
+    //     depth,
+    //     wall_color,
+    // ));
 
-    //     let bottom = bitmap.bottom(top_left.0, top_right.0, top_left.1);
-
-    //     assert!(top_right.0 < bitmap.width);
-    //     assert!(bottom < bitmap.height);
-
-    //     rects.push(RectangularPrism::new(
-    //         Point3::new(
-    //             (bitmap.width - top_left.0) as f32,
-    //             (bitmap.height - top_left.1) as f32,
-    //             0f32,
-    //         ),
-    //         (top_right.0 - top_left.0) as f32,
-    //         (bottom - top_left.1 + 1) as f32,
-    //         5.0,
-    //     ));
-
-    //     // continue from top-right
-    //     match bitmap.next(top_right.0, top_right.1) {
-    //         Some((next_x, next_y)) => {
-    //             x = next_x;
-    //             y = next_y;
-    //         }
-    //         None => {
-    //             return rects;
-    //         }
-    //     }
-    // }
+    SceneInput { voxels, prisms }
 }
 
 pub fn generate_world_from_png<P: AsRef<Path>>(
     png_path: P,
-) -> Result<(Vec<RectangularPrism>, u32, u32), Error> {
+) -> Result<(SceneInput, u32, u32), Error> {
     let img = image::open(png_path)?;
     let bitmap = Bitmap::from_image(img);
-    let rects = bitmap_to_rects(&bitmap);
+    let input = bitmap_to_scene_input(&bitmap);
     Ok((
-        rects,
+        input,
         bitmap.width.try_into().unwrap(),
         bitmap.height.try_into().unwrap(),
     ))
 }
 
 pub fn render_rects_to_file<P: AsRef<std::path::Path>>(
-    rects: Vec<RectangularPrism>,
+    input: SceneInput,
     width: u32,
     height: u32,
     output_path: P,
@@ -237,31 +211,18 @@ pub fn render_rects_to_file<P: AsRef<std::path::Path>>(
         *pixel = image::Rgb([255, 255, 255]);
     }
 
-    // Draw each rect with a random color
-    let mut rng = rand::rng();
-    use rand::Rng;
-
-    for rect in &rects {
-        // Generate random color
-        let r = rng.random_range(0..=255);
-        let g = rng.random_range(0..=255);
-        let b = rng.random_range(0..=255);
+    // Draw each voxel with its color
+    for voxel in &input.voxels {
+        let r = (voxel.color[0] * 255.0) as u8;
+        let g = (voxel.color[1] * 255.0) as u8;
+        let b = (voxel.color[2] * 255.0) as u8;
         let color = image::Rgb([r, g, b]);
 
-        // Convert 3D rect to 2D (top-down view using x and z coordinates)
-        let x = rect.position.x as i32;
-        let y = rect.position.y as i32;
-        let width = rect.width as i32;
-        let height = rect.height as i32;
+        let x = voxel.pos.x;
+        let y = voxel.pos.y;
 
-        // Draw the rectangle
-        for dy in 0..height {
-            for dx in 0..width {
-                let px = x + dx;
-                let py = y + dy;
-
-                img.put_pixel(px as u32, py as u32, color);
-            }
+        if x >= 0 && y >= 0 && (x as u32) < width && (y as u32) < height {
+            img.put_pixel(x as u32, y as u32, color);
         }
     }
 
