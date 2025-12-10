@@ -16,6 +16,18 @@ enum Commands {
         /// disables postprocessing
         #[arg(long, default_value_t = false)]
         dont_postprocess: bool,
+
+        /// Optional world path
+        #[arg(short, long)]
+        world: Option<String>,
+
+        /// Seed for WFC/height map generation
+        #[arg(short, long, default_value = "17")]
+        seed: u64,
+
+        /// Width/height of WFC wave (default: 10)
+        #[arg(short, long, default_value = "10")]
+        n: usize,
     },
     // /// Render scene
     // RenderScene {
@@ -39,14 +51,14 @@ enum Commands {
     Wfc {
         /// Output file path
         path: String,
+
         /// Seed for WFC generation
+        #[arg(short, long, default_value = "17")]
         seed: u64,
+
         /// Width/height of WFC wave (default: 10)
         #[arg(short, long, default_value = "10")]
         n: usize,
-        // /// Path to tileset XML file
-        // #[arg(long, default_value = "src/procgen/tilemaps/Rooms/tileset.xml")]
-        // tileset: String,
     },
 }
 
@@ -54,8 +66,13 @@ fn main() -> Result<(), Error> {
     let args = Cli::parse();
 
     match args.command {
-        Commands::Interactive { dont_postprocess } => {
-            run_interactive(!dont_postprocess)?;
+        Commands::Interactive {
+            dont_postprocess,
+            n,
+            seed,
+            world,
+        } => {
+            run_interactive(!dont_postprocess, n, seed, world.as_deref())?;
         }
         // Commands::RenderScene {
         //     path,

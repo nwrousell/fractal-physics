@@ -2,7 +2,8 @@ use std::collections::{HashSet, VecDeque};
 
 use anyhow::Error;
 use image::{DynamicImage, ImageBuffer, Rgb};
-use rand::prelude::*;
+use indicatif::{ProgressBar, ProgressStyle};
+use rand::{prelude::*, rngs::StdRng};
 
 use crate::procgen::types::{Bit, TILE_SIZE, Tile, Tileset};
 
@@ -12,7 +13,9 @@ pub enum WaveTile {
     Unobserved(Vec<bool>),
 }
 
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Bitmap {
     pub bits: Vec<Bit>,
     pub width: usize,
@@ -35,6 +38,117 @@ impl Bitmap {
 
         DynamicImage::from(img)
     }
+
+    pub fn compute_height_map(&self, seed: u64) -> HeightMap {
+        let mut bottoms = vec![0; self.width * self.height];
+        let mut tops = vec![1; self.width * self.height];
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        // Helper to check if a bit is part of the island (not empty)
+        let is_island = |bit: &Bit| *bit != Bit::Space;
+
+        // Find all edge pixels: island pixels adjacent to empty pixels
+        let mut edges: Vec<(usize, usize)> = Vec::new();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let idx = y * self.width + x;
+                if !is_island(&self.bits[idx]) {
+                    continue;
+                }
+
+                // Check if any neighbor is empty (or out of bounds = edge)
+                let neighbors = [
+                    (x.wrapping_sub(1), y),
+                    (x + 1, y),
+                    (x, y.wrapping_sub(1)),
+                    (x, y + 1),
+                ];
+
+                let is_edge = neighbors.iter().any(|&(nx, ny)| {
+                    if nx >= self.width || ny >= self.height {
+                        true // out of bounds counts as edge
+                    } else {
+                        !is_island(&self.bits[ny * self.width + nx])
+                    }
+                });
+
+                if is_edge {
+                    edges.push((x, y));
+                }
+            }
+        }
+
+        // BFS inward from edges, setting bottom and top values
+        let mut visited = HashSet::new();
+        let mut queue: VecDeque<(usize, usize, i32, i32)> = VecDeque::new(); // (x, y, bottom, top)
+
+        // Start with bottom=-1, top=1 at edge
+        for &(x, y) in &edges {
+            visited.insert((x, y));
+            queue.push_back((x, y, -1, 1));
+            let idx = y * self.width + x;
+            bottoms[idx] = -1;
+            tops[idx] = 1;
+        }
+
+        // BFS with decreasing bottom values and varying top values
+        while let Some((x, y, bottom, top)) = queue.pop_front() {
+            let mut neighbors = [
+                (x.wrapping_sub(1), y),
+                (x + 1, y),
+                (x, y.wrapping_sub(1)),
+                (x, y + 1),
+            ];
+            neighbors.shuffle(&mut rng);
+
+            for (nx, ny) in neighbors {
+                if nx >= self.width || ny >= self.height {
+                    continue;
+                }
+
+                let nidx = ny * self.width + nx;
+                if !is_island(&self.bits[nidx]) || visited.contains(&(nx, ny)) {
+                    continue;
+                }
+
+                visited.insert((nx, ny));
+
+                // Bottom: weighted chance to go down
+                let bottom_step = if rng.random_bool(0.4) { -1 } else { 0 };
+                let new_bottom = bottom + bottom_step;
+                bottoms[nidx] = new_bottom;
+
+                // Top: weighted choice between -1, 0, +1, lower bounded by 1
+                // Force top=1 for roads
+                let new_top = if self.bits[nidx] == Bit::Road {
+                    1
+                } else {
+                    let top_step = {
+                        let r: f64 = rng.random();
+                        if r < 0.33 {
+                            -1
+                        } else if r < 0.66 {
+                            0
+                        } else {
+                            1
+                        }
+                    };
+                    (top + top_step).max(1)
+                };
+                tops[nidx] = new_top;
+
+                queue.push_back((nx, ny, new_bottom, new_top));
+            }
+        }
+
+        HeightMap { bottoms, tops }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HeightMap {
+    pub bottoms: Vec<i32>,
+    pub tops: Vec<i32>,
 }
 
 impl WaveTile {
@@ -114,7 +228,7 @@ impl WaveFunctionCollapse {
 
         // Collapse a random tile into a path end to seed the generation
         // wfc.collapse_random_to_tile("road_end");
-        wfc.collapse_xy_to_tile(10, 18, "road_end");
+        wfc.collapse_xy_to_tile(5, 5, "road_end");
 
         wfc
     }
@@ -138,7 +252,7 @@ impl WaveFunctionCollapse {
     }
 
     /// Collapse a random unobserved tile to a specific tile type (any rotation)
-    pub fn collapse_random_to_tile(&mut self, tile_name: &str) {
+    pub fn _collapse_random_to_tile(&mut self, tile_name: &str) {
         // Find all unobserved tiles
         let unobserved: Vec<(usize, usize)> = (0..self.wave.height)
             .flat_map(|y| (0..self.wave.width).map(move |x| (x, y)))
@@ -325,11 +439,36 @@ impl WaveFunctionCollapse {
     }
 
     /// step until finished or in a contradictory state. Returns whether ran into a contradictory state
-    pub fn step_all(&mut self) -> bool {
-        for _ in 0..(self.wave.width * self.wave.height) {
+    pub fn step_all(&mut self, show_progress: bool) -> bool {
+        let total = (self.wave.width * self.wave.height) as u64;
+
+        let progress = if show_progress {
+            let bar = ProgressBar::new(total);
+            bar.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                    .unwrap()
+                    .progress_chars("#>-"),
+            );
+            Some(bar)
+        } else {
+            None
+        };
+
+        for _ in 0..total {
             if let Err(_) = self.step() {
+                if let Some(bar) = progress {
+                    bar.finish_with_message("contradiction!");
+                }
                 return true;
             }
+            if let Some(ref bar) = progress {
+                bar.inc(1);
+            }
+        }
+
+        if let Some(bar) = progress {
+            bar.finish_with_message("done");
         }
 
         false

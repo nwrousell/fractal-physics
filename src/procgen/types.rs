@@ -5,7 +5,9 @@ pub struct BaseTile {
     pub bitmap: TileBitmap,
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize)]
 pub enum Bit {
     Road,
     Space,

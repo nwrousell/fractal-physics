@@ -6,7 +6,6 @@ mod vertex;
 
 use std::collections::HashSet;
 
-use cgmath::{EuclideanSpace, Point3};
 use tessellate::Face;
 pub use vertex::Vertex;
 
@@ -134,7 +133,7 @@ impl Scene {
         let player = Player::new();
 
         let lights = Lights::new(vec![LightUniform::new(
-            [30.0, 30.0, 50000.0],
+            [30.0, 30000.0, 50000.0],
             [1.0, 1.0, 1.0],
         )]);
 

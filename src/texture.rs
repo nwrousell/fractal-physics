@@ -12,14 +12,14 @@ pub struct Texture {
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    pub fn from_bytes(
+    pub fn _from_bytes(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bytes: &[u8],
         label: &str,
     ) -> Result<Self> {
         let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label))
+        Self::_from_image(device, queue, &img, Some(label))
     }
 
     pub fn create_depth_texture(
@@ -65,7 +65,7 @@ impl Texture {
         }
     }
 
-    pub fn from_image(
+    pub fn _from_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         img: &image::DynamicImage,
@@ -87,7 +87,7 @@ impl Texture {
             wgpu::TextureFormat::Rgba8UnormSrgb,
             false,
         );
-        tex.write(queue, rgba);
+        tex._write(queue, rgba);
         Ok(tex)
     }
 
@@ -132,7 +132,7 @@ impl Texture {
         }
     }
 
-    pub fn write(&mut self, queue: &wgpu::Queue, rgba: ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    pub fn _write(&mut self, queue: &wgpu::Queue, rgba: ImageBuffer<Rgba<u8>, Vec<u8>>) {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 aspect: wgpu::TextureAspect::All,
@@ -163,7 +163,7 @@ pub struct PostprocessTexture {
 
     bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
-    resolution_buffer: wgpu::Buffer,
+    _resolution_buffer: wgpu::Buffer,
 }
 
 impl PostprocessTexture {
@@ -290,7 +290,7 @@ impl PostprocessTexture {
             texture,
             bind_group,
             render_pipeline,
-            resolution_buffer,
+            _resolution_buffer: resolution_buffer,
         }
     }
 

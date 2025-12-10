@@ -1,12 +1,10 @@
 use crate::{
-    procgen::{types::Bit, wfc::Bitmap},
+    procgen::{
+        types::Bit,
+        wfc::{Bitmap, HeightMap},
+    },
     scene::{Voxel, VoxelPos},
 };
-
-use anyhow::Error;
-use cgmath::Point3;
-use image::{DynamicImage, GenericImageView};
-use rand::Rng;
 
 mod parse;
 mod tileset;
@@ -17,34 +15,41 @@ pub use tileset::make_island_race_tileset;
 
 pub use wfc::WaveFunctionCollapse;
 
-pub fn bitmap_to_voxels(bitmap: &Bitmap) -> Vec<Voxel> {
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct WorldDefinition {
+    pub bitmap: Bitmap,
+    pub height_map: HeightMap,
+}
+
+pub fn bitmap_to_voxels(world_def: WorldDefinition) -> Vec<Voxel> {
     let mut voxels = Vec::new();
 
-    // TODO: height map generation
+    let bitmap = world_def.bitmap;
+    let height_map = world_def.height_map;
 
     for x in 0..bitmap.width {
         for y in 0..bitmap.height {
             let bit = bitmap.bits[y * bitmap.width + x];
             if !matches!(bit, Bit::Space) {
-                let pos = VoxelPos::new(x.try_into().unwrap(), 0, y.try_into().unwrap());
-                let voxel = Voxel::new(pos, 1.0, 1.0, 1.0, bit.color());
-                voxels.push(voxel);
+                let bottom = height_map.bottoms[y * bitmap.width + x];
+                let top = height_map.tops[y * bitmap.width + x];
+
+                for level in bottom..0 {
+                    let pos = VoxelPos::new(x.try_into().unwrap(), level, y.try_into().unwrap());
+                    let voxel = Voxel::new(pos, 1.0, 1.0, 1.0, Bit::Dirt.color());
+                    voxels.push(voxel);
+                }
+
+                for level in 0..top {
+                    let pos = VoxelPos::new(x.try_into().unwrap(), level, y.try_into().unwrap());
+                    let voxel = Voxel::new(pos, 1.0, 1.0, 1.0, bit.color());
+                    voxels.push(voxel);
+                }
             }
         }
     }
 
     voxels
 }
-
-// pub fn generate_world_from_png<P: AsRef<Path>>(
-//     png_path: P,
-// ) -> Result<(SceneInput, u32, u32), Error> {
-//     let img = image::open(png_path)?;
-//     let bitmap = Bitmap::from_image(img);
-//     let input = bitmap_to_scene_input(&bitmap);
-//     Ok((
-//         input,
-//         bitmap.width.try_into().unwrap(),
-//         bitmap.height.try_into().unwrap(),
-//     ))
-// }

@@ -4,8 +4,9 @@ use winit::event_loop::EventLoop;
 use wasm_bindgen::prelude::*;
 
 use crate::app::App;
-use crate::game::Game;
-use crate::procgen::{WaveFunctionCollapse, bitmap_to_voxels, make_island_race_tileset};
+use crate::procgen::{
+    WaveFunctionCollapse, WorldDefinition, bitmap_to_voxels, make_island_race_tileset,
+};
 use crate::scene::Scene;
 
 mod app;
@@ -16,22 +17,32 @@ mod procgen;
 mod scene;
 mod texture;
 
-pub fn run_wfc<P: AsRef<std::path::Path>>(
-    seed: u64,
-    n: usize,
-    output_path: P,
-) -> anyhow::Result<()> {
-    // let tileset = parse_tileset_xml(tileset_path)?;
+pub fn run_wfc(seed: u64, n: usize, output_prefix: &str) -> anyhow::Result<()> {
+    let img_path = output_prefix.to_owned() + ".png";
+    let world_path = output_prefix.to_owned() + ".json";
+
     let tileset = make_island_race_tileset();
     let mut wfc = WaveFunctionCollapse::new(tileset, n, n, seed);
-    wfc.step_all();
+    wfc.step_all(true);
     let bitmap = wfc.bitmap();
     let img = bitmap.render_to_image();
-    img.save(output_path)?;
+    img.save(img_path)?;
+
+    let height_map = bitmap.compute_height_map(seed);
+    let world_def = WorldDefinition { bitmap, height_map };
+
+    let json = serde_json::to_string(&world_def)?;
+    std::fs::write(world_path, json)?;
+
     Ok(())
 }
 
-pub fn run_interactive(do_postprocess: bool) -> anyhow::Result<()> {
+pub fn run_interactive(
+    do_postprocess: bool,
+    n: usize,
+    seed: u64,
+    world_path: Option<&str>,
+) -> anyhow::Result<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
@@ -43,11 +54,20 @@ pub fn run_interactive(do_postprocess: bool) -> anyhow::Result<()> {
 
     let event_loop: EventLoop<crate::game::Game> = EventLoop::with_user_event().build()?;
 
-    let tileset = make_island_race_tileset();
-    let mut wfc = WaveFunctionCollapse::new(tileset, 20, 20, 17);
-    wfc.step_all();
-    let bitmap = wfc.bitmap();
-    let voxels = bitmap_to_voxels(&bitmap);
+    let voxels = if let Some(world_path) = world_path {
+        let json = std::fs::read_to_string(world_path)?;
+        let world_def: WorldDefinition = serde_json::from_str(&json)?;
+        bitmap_to_voxels(world_def)
+    } else {
+        let tileset = make_island_race_tileset();
+        let mut wfc = WaveFunctionCollapse::new(tileset, n, n, seed);
+        wfc.step_all(true);
+        let bitmap = wfc.bitmap();
+        let height_map = bitmap.compute_height_map(seed);
+        let world_def = WorldDefinition { bitmap, height_map };
+        bitmap_to_voxels(world_def)
+    };
+
     let scene = Scene::new(4, voxels);
 
     let mut app = App::new(

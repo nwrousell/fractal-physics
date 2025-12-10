@@ -118,7 +118,7 @@ impl Camera {
         // Mouse rotation
         let (dx, dy) = self.controller.mouse_delta;
         if dx != 0.0 || dy != 0.0 {
-            use cgmath::{Angle, InnerSpace as _, Matrix3, Rad};
+            use cgmath::{InnerSpace as _, Matrix3, Rad};
 
             let forward = self.config.target - self.config.eye;
             let forward_mag = forward.magnitude();

@@ -32,7 +32,7 @@ pub struct Game {
 }
 
 impl Game {
-    pub async fn new_headless(
+    pub async fn _new_headless(
         scene: Scene,
         width: u32,
         height: u32,
@@ -423,7 +423,7 @@ impl Game {
     }
 
     // https://sotrh.github.io/learn-wgpu/showcase/windowless/
-    pub async fn render_to_file<P: AsRef<std::path::Path>>(
+    pub async fn _render_to_file<P: AsRef<std::path::Path>>(
         &mut self,
         output_path: P,
         width: u32,

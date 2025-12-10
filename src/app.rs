@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use winit::{
     application::ApplicationHandler,
-    event::{ElementState, KeyEvent, MouseButton, WindowEvent},
+    event::{KeyEvent, MouseButton, WindowEvent},
     event_loop::ActiveEventLoop,
     keyboard::PhysicalKey,
     window::Window,
