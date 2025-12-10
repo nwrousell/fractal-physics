@@ -406,6 +406,8 @@ impl Game {
             event_loop.exit();
         } else {
             self.camera.handle_key(code, is_pressed);
+            self.scene.player.handle_key(code, is_pressed);
+            self.scene.player.write_buffer(&self.queue);
         }
     }
 
@@ -420,6 +422,8 @@ impl Game {
     pub fn update(&mut self) {
         self.camera.update();
         self.camera.write_buffer(&self.queue);
+        // this is going to be a tick -> adds to scene and then that adds the player
+        self.scene.update(&self.queue); 
     }
 
     // https://sotrh.github.io/learn-wgpu/showcase/windowless/

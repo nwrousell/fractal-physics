@@ -124,3 +124,9 @@ fn make_face(
         }
     }
 }
+
+pub fn tessellate_cube(vertices: &mut Vec<Vertex>, tessellation_param: u32) {
+    for face in Face::ALL {
+        face.tessellate(vertices, tessellation_param);
+    }
+}
