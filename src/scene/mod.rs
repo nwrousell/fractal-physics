@@ -91,39 +91,34 @@ pub struct Scene {
 }
 
 impl Scene {
-
     // pub fn calculate_car_bounding_box(player: &Player) -> AABB {
- 
-    //     let car_half_extents = cgmath::Vector3::new(0.75 / 2.0, 0.5 / 2.0, 2.0 / 2.0); 
 
+    //     let car_half_extents = cgmath::Vector3::new(0.75 / 2.0, 0.5 / 2.0, 2.0 / 2.0);
 
     //     let car_min = player.x - car_half_extents;
     //     let car_max = player.x + car_half_extents;
-
 
     //     AABB { min: car_min, max: car_max }
     // }
     pub fn calculate_car_bounding_box(player: &Player) -> AABB {
         use cgmath::Transform;
-        let he = cgmath::Vector3::new(0.5, 0.5, 0.5); 
+        let he = cgmath::Vector3::new(0.5, 0.5, 0.5);
 
         let corners = [
             cgmath::vec3(-he.x, -he.y, -he.z),
-            cgmath::vec3( he.x, -he.y, -he.z),
-            cgmath::vec3(-he.x,  he.y, -he.z),
-            cgmath::vec3( he.x,  he.y, -he.z),
-            cgmath::vec3(-he.x, -he.y,  he.z),
-            cgmath::vec3( he.x, -he.y,  he.z),
-            cgmath::vec3(-he.x,  he.y,  he.z),
-            cgmath::vec3( he.x,  he.y,  he.z),
+            cgmath::vec3(he.x, -he.y, -he.z),
+            cgmath::vec3(-he.x, he.y, -he.z),
+            cgmath::vec3(he.x, he.y, -he.z),
+            cgmath::vec3(-he.x, -he.y, he.z),
+            cgmath::vec3(he.x, -he.y, he.z),
+            cgmath::vec3(-he.x, he.y, he.z),
+            cgmath::vec3(he.x, he.y, he.z),
         ];
 
         let mut min = cgmath::vec3(f32::INFINITY, f32::INFINITY, f32::INFINITY);
         let mut max = cgmath::vec3(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
 
         for c in &corners {
-
-
             let vec_to_pt3 = cgmath::Point3::new(c.x, c.y, c.z);
             let world = player.ctm.transform_point(vec_to_pt3);
 
@@ -138,8 +133,6 @@ impl Scene {
 
         AABB { min, max }
     }
-
-
 
     pub fn new(tessellation_param: u32, voxels: Vec<Voxel>) -> Self {
         let mut vertices = Vec::new();
@@ -172,23 +165,13 @@ impl Scene {
                     face_instances[i].push(ObjectData::new(ctm, color));
                 }
             }
-            // let min = Vector3::new(
-            //     voxel.pos.x as f32,
-            //     voxel.pos.y as f32,
-            //     voxel.pos.z as f32,
-            // );
-            // print!("Voxel at {:?} width {:?} height {:?} depth {:?}\n", voxel.pos, voxel.width , voxel.height, voxel.depth);
+            let vox_pos_f =
+                Vector3::new(voxel.pos.x as f32, voxel.pos.y as f32, voxel.pos.z as f32);
 
-            // let max = min + Vector3::new(voxel.width, voxel.height, voxel.depth);
-            let vox_pos_f = Vector3::new(
-                voxel.pos.x as f32,
-                voxel.pos.y as f32,
-                voxel.pos.z as f32,
-            );
-
-            let min = vox_pos_f - Vector3::new(voxel.width / 2.0, voxel.height / 2.0, voxel.depth / 2.0);
-            let max = vox_pos_f + Vector3::new(voxel.width / 2.0, voxel.height / 2.0, voxel.depth / 2.0);
-
+            let min =
+                vox_pos_f - Vector3::new(voxel.width / 2.0, voxel.height / 2.0, voxel.depth / 2.0);
+            let max =
+                vox_pos_f + Vector3::new(voxel.width / 2.0, voxel.height / 2.0, voxel.depth / 2.0);
 
             obstacles.push(AABB { min, max });
         }
@@ -206,28 +189,17 @@ impl Scene {
         }
 
         // create player
-        // TODO
-        let mut player = Player::new(); 
-        // initial position
+        let mut player = Player::new();
         player.x = cgmath::Vector3::new(21.0, 1.0, 0.0);
 
-        let width = 0.75; 
-        let height = 0.5; 
-        let depth = 2.0; 
+        let width = 0.75;
+        let height = 0.5;
+        let depth = 2.0;
 
-        // let scaling_matrix = cgmath::Matrix4::from_nonuniform_scale(width, height, depth);
+        player.ctm = cgmath::Matrix4::from_translation(player.x)
+            * cgmath::Matrix4::from(player.R)
+            * cgmath::Matrix4::from_nonuniform_scale(width, height, depth);
 
-        // let scaled_ctm = player.ctm * scaling_matrix;
-
-        // player.ctm = scaling_matrix * cgmath::Matrix4::from(player.R)
-        //     * cgmath::Matrix4::from_translation(player.x);
-        player.ctm =
-            cgmath::Matrix4::from_translation(player.x) *
-            cgmath::Matrix4::from(player.R) *
-            cgmath::Matrix4::from_nonuniform_scale(width, height, depth);
-        
-        // Scene::create_car(&mut player, &mut vertices, tessellation_param as f32, &mut object_collections);
-        
         let player_mesh_start = vertices.len() as u32;
         tessellate::tessellate_cube(&mut vertices, tessellation_param);
         let player_mesh_count = vertices.len() as u32 - player_mesh_start;
@@ -243,7 +215,7 @@ impl Scene {
         ));
 
         let lights = Lights::new(vec![LightUniform::new(
-            [30.0, 30000.0, 50000.0],
+            [30.0, 50000.0, 50000.0],
             [1.0, 1.0, 1.0],
         )]);
 
@@ -252,7 +224,7 @@ impl Scene {
             vertices,
             lights,
             player,
-            obstacles
+            obstacles,
         }
     }
 
@@ -272,7 +244,6 @@ impl Scene {
         let mut most_collided: Option<(Vector3<f32>, f32, f32)> = None;
 
         for cube in &self.obstacles {
-
             let min = cube.min;
             let max = cube.max;
 
@@ -282,20 +253,53 @@ impl Scene {
             let player_min = car_bounding_box.min;
             let player_max = car_bounding_box.max;
 
-
             let overlap_x = (player_max.x - min.x).min(max.x - player_min.x);
             let overlap_y = (player_max.y - min.y).min(max.y - player_min.y);
             let overlap_z = (player_max.z - min.z).min(max.z - player_min.z);
 
-
             if overlap_x > 0.0 && overlap_y > 0.0 && overlap_z > 0.0 {
-
                 let (pen, normal, area) = if overlap_x <= overlap_y && overlap_x <= overlap_z {
-                    (overlap_x, Vector3::new(if player.x.x > (min.x + max.x) * 0.5 { 1.0 } else { -1.0 }, 0.0, 0.0), overlap_y * overlap_z)
+                    (
+                        overlap_x,
+                        Vector3::new(
+                            if player.x.x > (min.x + max.x) * 0.5 {
+                                1.0
+                            } else {
+                                -1.0
+                            },
+                            0.0,
+                            0.0,
+                        ),
+                        overlap_y * overlap_z,
+                    )
                 } else if overlap_y <= overlap_z {
-                    (overlap_y, Vector3::new(0.0, if player.x.y > (min.y + max.y) * 0.5 { 1.0 } else { -1.0 }, 0.0), overlap_x * overlap_z)
+                    (
+                        overlap_y,
+                        Vector3::new(
+                            0.0,
+                            if player.x.y > (min.y + max.y) * 0.5 {
+                                1.0
+                            } else {
+                                -1.0
+                            },
+                            0.0,
+                        ),
+                        overlap_x * overlap_z,
+                    )
                 } else {
-                    (overlap_z, Vector3::new(0.0, 0.0, if player.x.z > (min.z + max.z) * 0.5 { 1.0 } else { -1.0 }), overlap_x * overlap_y)
+                    (
+                        overlap_z,
+                        Vector3::new(
+                            0.0,
+                            0.0,
+                            if player.x.z > (min.z + max.z) * 0.5 {
+                                1.0
+                            } else {
+                                -1.0
+                            },
+                        ),
+                        overlap_x * overlap_y,
+                    )
                 };
 
                 if most_collided.is_none() || pen > most_collided.unwrap().1 {
@@ -303,7 +307,6 @@ impl Scene {
                 }
             }
         }
-
 
         if let Some((normal, pen, _)) = most_collided {
             let backoff = 0.5;
@@ -316,7 +319,6 @@ impl Scene {
             }
         }
     }
-
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
         self.player.update();
@@ -332,7 +334,6 @@ impl Scene {
                 }
             }
         }
-        // self.player.write_buffer(queue);
     }
 
     pub fn vertices(&self) -> &[u8] {
