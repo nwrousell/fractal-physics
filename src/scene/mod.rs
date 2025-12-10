@@ -109,14 +109,6 @@ impl RectangularPrism {
     }
 }
 
-/// Input data for scene generation
-pub struct SceneInput {
-    /// Voxels that should have face culling applied
-    pub voxels: Vec<Voxel>,
-    /// Rectangular prisms that render all faces (e.g., walls)
-    pub prisms: Vec<RectangularPrism>,
-}
-
 pub struct Scene {
     pub vertices: Vec<Vertex>,
     pub object_collections: Vec<ObjectCollection>,
@@ -124,7 +116,7 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn new(tessellation_param: u32, input: SceneInput) -> Self {
+    pub fn new(tessellation_param: u32, voxels: Vec<Voxel>) -> Self {
         let mut vertices = Vec::new();
 
         // Tessellate each face type and record its mesh
@@ -137,12 +129,12 @@ impl Scene {
         }
 
         // Build occupancy set from voxels for face culling
-        let occupied: HashSet<VoxelPos> = input.voxels.iter().map(|v| v.pos).collect();
+        let occupied: HashSet<VoxelPos> = voxels.iter().map(|v| v.pos).collect();
 
         // Generate face instances for each face type
         let mut face_instances: [Vec<ObjectData>; 6] = Default::default();
 
-        for voxel in &input.voxels {
+        for voxel in &voxels {
             let ctm = voxel.to_ctm();
             let color = voxel.color;
 
@@ -152,15 +144,6 @@ impl Scene {
                 if !occupied.contains(&neighbor) {
                     face_instances[i].push(ObjectData::new(ctm, color));
                 }
-            }
-        }
-
-        // Add all prism faces (no culling for walls etc.)
-        for prism in &input.prisms {
-            let ctm = prism.to_ctm();
-            let color = prism.color;
-            for i in 0..6 {
-                face_instances[i].push(ObjectData::new(ctm, color));
             }
         }
 

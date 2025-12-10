@@ -1,91 +1,44 @@
-use anyhow::{Result, bail};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy)]
-pub enum Symmetry {
-    None,
-    X,
-    L,
-    I,
-    T,
-    Slash,
-}
-
-impl Symmetry {
-    pub fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "None" => Ok(Symmetry::None),
-            "X" => Ok(Symmetry::X),
-            "L" => Ok(Symmetry::L),
-            "I" => Ok(Symmetry::I),
-            "T" => Ok(Symmetry::T),
-            "\\" => Ok(Symmetry::Slash),
-            "F" => Ok(Symmetry::None),
-            _ => bail!("Unknown symmetry: {}", s),
-        }
-    }
-
-    pub fn symmetric_sides(&self, side: u8) -> Vec<u8> {
-        match self {
-            Symmetry::None => vec![side],
-            Symmetry::X => vec![0, 1, 2, 3],
-            Symmetry::L => {
-                if side == 1 || side == 2 {
-                    vec![1, 2]
-                } else {
-                    vec![0, 3]
-                }
-            }
-            Symmetry::I => {
-                if side == 0 || side == 2 {
-                    vec![0, 2]
-                } else {
-                    vec![1, 3]
-                }
-            }
-            Symmetry::T => {
-                if side == 1 || side == 3 {
-                    vec![1, 3]
-                } else {
-                    vec![side]
-                }
-            }
-            Symmetry::Slash => {
-                if side == 0 || side == 1 {
-                    vec![0, 1]
-                } else {
-                    vec![2, 3]
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BaseTile {
-    pub img: image::DynamicImage,
-    pub symmetry: Symmetry,
+    pub bitmap: TileBitmap,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum Bit {
+    Road,
+    Space,
+    Grass,
+    Dirt,
+    Empty,
+}
+
+impl Bit {
+    pub fn color(&self) -> [f32; 4] {
+        match self {
+            Bit::Road => [0.3, 0.3, 0.3, 1.0],    // dark gray
+            Bit::Space => [0.9, 0.9, 0.95, 1.0],  // near white/light blue
+            Bit::Grass => [0.2, 0.7, 0.2, 1.0],   // green
+            Bit::Dirt => [0.55, 0.27, 0.07, 1.0], // brown
+            Bit::Empty => [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+}
+
 pub struct Tile {
     pub base_tile_idx: usize,
     pub rotation: u8,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Neighbor {
-    pub tile_one_idx: usize,
-    pub side_one: u8,
-    pub tile_two_idx: usize,
-    pub side_two: u8,
-}
+pub const TILE_SIZE: usize = 4;
+
+pub type TileBitmap = [[Bit; TILE_SIZE]; TILE_SIZE];
 
 #[derive(Debug)]
 pub struct Tileset {
     pub tiles: HashMap<String, BaseTile>,
     pub tile_names: Vec<String>,
-    pub tile_size: usize,
     pub allowed_neighbors: Vec<[Vec<bool>; 4]>,
     pub tile_weights: Vec<f32>,
 }

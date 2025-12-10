@@ -1,10 +1,10 @@
 use std::collections::{HashSet, VecDeque};
 
 use anyhow::Error;
-use image::{DynamicImage, GenericImage, ImageBuffer, Rgb};
+use image::{DynamicImage, ImageBuffer, Rgb};
 use rand::prelude::*;
 
-use crate::procgen::types::{Tile, Tileset};
+use crate::procgen::types::{Bit, TILE_SIZE, Tile, Tileset};
 
 #[derive(Debug)]
 pub enum WaveTile {
@@ -12,10 +12,35 @@ pub enum WaveTile {
     Unobserved(Vec<bool>),
 }
 
+#[derive(Debug)]
+pub struct Bitmap {
+    pub bits: Vec<Bit>,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Bitmap {
+    pub fn render_to_image(&self) -> DynamicImage {
+        let mut img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+            ImageBuffer::new(self.width as u32, self.height as u32);
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let bit = &self.bits[y * self.width + x];
+                let [r, g, b, _] = bit.color();
+                let pixel = Rgb([(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]);
+                img.put_pixel(x as u32, y as u32, pixel);
+            }
+        }
+
+        DynamicImage::from(img)
+    }
+}
+
 impl WaveTile {
     fn num_possible_options(&self) -> usize {
         match self {
-            Self::Observed(_) => 999999,
+            Self::Observed(_) => usize::MAX,
             Self::Unobserved(possibilities) => {
                 possibilities.iter().map(|b| if *b { 1 } else { 0 }).sum()
             }
@@ -77,7 +102,7 @@ impl WaveFunctionCollapse {
 
         let rng = rand::rngs::StdRng::seed_from_u64(seed);
 
-        WaveFunctionCollapse {
+        let mut wfc = WaveFunctionCollapse {
             tileset,
             wave: Wave {
                 tiles,
@@ -85,6 +110,94 @@ impl WaveFunctionCollapse {
                 height,
             },
             rng,
+        };
+
+        // Collapse a random tile into a path end to seed the generation
+        // wfc.collapse_random_to_tile("road_end");
+        wfc.collapse_xy_to_tile(10, 18, "road_end");
+
+        wfc
+    }
+
+    /// Collapse a specific tile position to a specific tile type (any rotation)
+    pub fn collapse_xy_to_tile(&mut self, x: usize, y: usize, tile_name: &str) {
+        // Find the base tile index for this name
+        let base_idx = self
+            .tileset
+            .tile_names
+            .iter()
+            .position(|n| n == tile_name)
+            .expect("tile name not found");
+
+        // Pick a random rotation (0-3)
+        let rotation = self.rng.random_range(0..4);
+        let tile_idx = base_idx * 4 + rotation;
+
+        *self.wave.get_mut(x, y) = WaveTile::Observed(tile_idx);
+        self.propagate_from(x, y);
+    }
+
+    /// Collapse a random unobserved tile to a specific tile type (any rotation)
+    pub fn collapse_random_to_tile(&mut self, tile_name: &str) {
+        // Find all unobserved tiles
+        let unobserved: Vec<(usize, usize)> = (0..self.wave.height)
+            .flat_map(|y| (0..self.wave.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| matches!(self.wave.get(x, y), WaveTile::Unobserved(_)))
+            .collect();
+
+        if let Some(&(x, y)) = unobserved.choose(&mut self.rng) {
+            self.collapse_xy_to_tile(x, y, tile_name);
+        }
+    }
+
+    /// Propagate constraints from a specific position
+    fn propagate_from(&mut self, start_x: usize, start_y: usize) {
+        let mut propagation_queue = VecDeque::new();
+        propagation_queue.push_back((start_x, start_y));
+        let mut visited = HashSet::new();
+
+        while let Some((x, y)) = propagation_queue.pop_front() {
+            if visited.contains(&(x, y)) {
+                continue;
+            } else {
+                visited.insert((x, y));
+            }
+
+            let center = self.wave.get(x, y);
+            let children = self.get_children(x, y);
+            let center_possible_options = center.possible_options();
+
+            for ((child_x, child_y), side) in children {
+                let child = self.wave.get(child_x, child_y);
+                let disallowed_options = match child {
+                    WaveTile::Unobserved(_) => {
+                        let child_possible = child.possible_options();
+                        let mut disallowed = Vec::new();
+
+                        'child_loop: for &child_opt in &child_possible {
+                            for &center_opt in center_possible_options.iter() {
+                                if self.is_allowed(center_opt, child_opt, side) {
+                                    continue 'child_loop;
+                                }
+                            }
+                            disallowed.push(child_opt);
+                        }
+
+                        disallowed
+                    }
+                    WaveTile::Observed(_) => Vec::new(),
+                };
+
+                if let WaveTile::Unobserved(items) = self.wave.get_mut(child_x, child_y) {
+                    for option in disallowed_options {
+                        items[option] = false;
+                    }
+
+                    if !visited.contains(&(child_x, child_y)) {
+                        propagation_queue.push_back((child_x, child_y));
+                    }
+                }
+            }
         }
     }
 
@@ -222,47 +335,87 @@ impl WaveFunctionCollapse {
         false
     }
 
-    /// renders current wave to texture/image
-    pub fn render(&self) -> Result<DynamicImage, Error> {
-        let width = self.wave.width * self.tileset.tile_size;
-        let height = self.wave.height * self.tileset.tile_size;
+    pub fn bitmap(&self) -> Bitmap {
+        let width = self.wave.width * TILE_SIZE;
+        let height = self.wave.height * TILE_SIZE;
 
-        let mut img: ImageBuffer<Rgb<u8>, Vec<u8>> =
-            ImageBuffer::new(width.try_into().unwrap(), height.try_into().unwrap());
+        let mut bits = vec![Bit::Empty; width * height];
 
-        for x in 0..self.wave.width {
-            for y in 0..self.wave.height {
-                let wave_slot = self.wave.get(x, y);
-                match wave_slot {
-                    WaveTile::Observed(tile_idx) => {
-                        let tile = self.index_to_tile(*tile_idx);
-                        let tile_name = &self.tileset.tile_names[tile.base_tile_idx];
-                        let base_img = &self
-                            .tileset
-                            .tiles
-                            .get(tile_name)
-                            .expect("tile not found")
-                            .img;
-                        let rotated_img = match tile.rotation {
-                            0 => base_img.clone(),
-                            1 => base_img.rotate270(),
-                            2 => base_img.rotate180(),
-                            3 => base_img.rotate90(),
-                            _ => base_img.clone(),
-                        };
+        for slot_y in 0..self.wave.height {
+            for slot_x in 0..self.wave.width {
+                if let WaveTile::Observed(i) = self.wave.get(slot_x, slot_y) {
+                    let tile = self.index_to_tile(*i);
+                    let tile_name = &self.tileset.tile_names[tile.base_tile_idx];
+                    let base_bitmap = &self.tileset.tiles.get(tile_name).unwrap().bitmap;
+                    for tile_y in 0..TILE_SIZE {
+                        let y = slot_y * TILE_SIZE + tile_y;
+                        for tile_x in 0..TILE_SIZE {
+                            let bit = if tile.rotation == 0 {
+                                base_bitmap[tile_y][tile_x]
+                            } else if tile.rotation == 1 {
+                                base_bitmap[tile_x][TILE_SIZE - tile_y - 1]
+                            } else if tile.rotation == 2 {
+                                base_bitmap[TILE_SIZE - tile_y - 1][TILE_SIZE - tile_x - 1]
+                            } else {
+                                base_bitmap[TILE_SIZE - tile_x - 1][tile_y]
+                            };
 
-                        let tile_img = rotated_img.to_rgb8();
-
-                        let px = (x * self.tileset.tile_size) as u32;
-                        let py = (y * self.tileset.tile_size) as u32;
-
-                        img.copy_from(&tile_img, px, py)?;
+                            let x = slot_x * TILE_SIZE + tile_x;
+                            bits[y * width + x] = bit;
+                        }
                     }
-                    WaveTile::Unobserved(_) => (),
                 }
             }
         }
 
-        Ok(DynamicImage::from(img))
+        Bitmap {
+            bits,
+            width,
+            height,
+        }
     }
+
+    // /// renders current wave to texture/image
+    // pub fn render(&self) -> Result<DynamicImage, Error> {
+    //     let width = self.wave.width * self.tileset.tile_size;
+    //     let height = self.wave.height * self.tileset.tile_size;
+
+    //     let mut img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+    //         ImageBuffer::new(width.try_into().unwrap(), height.try_into().unwrap());
+
+    //     for x in 0..self.wave.width {
+    //         for y in 0..self.wave.height {
+    //             let wave_slot = self.wave.get(x, y);
+    //             match wave_slot {
+    //                 WaveTile::Observed(tile_idx) => {
+    //                     let tile = self.index_to_tile(*tile_idx);
+    //                     let tile_name = &self.tileset.tile_names[tile.base_tile_idx];
+    //                     let base_img = &self
+    //                         .tileset
+    //                         .tiles
+    //                         .get(tile_name)
+    //                         .expect("tile not found")
+    //                         .img;
+    //                     let rotated_img = match tile.rotation {
+    //                         0 => base_img.clone(),
+    //                         1 => base_img.rotate270(),
+    //                         2 => base_img.rotate180(),
+    //                         3 => base_img.rotate90(),
+    //                         _ => base_img.clone(),
+    //                     };
+
+    //                     let tile_img = rotated_img.to_rgb8();
+
+    //                     let px = (x * self.tileset.tile_size) as u32;
+    //                     let py = (y * self.tileset.tile_size) as u32;
+
+    //                     img.copy_from(&tile_img, px, py)?;
+    //                 }
+    //                 WaveTile::Unobserved(_) => (),
+    //             }
+    //         }
+    //     }
+
+    //     Ok(DynamicImage::from(img))
+    // }
 }

@@ -18,6 +18,7 @@ serde = { version = "1.0", features = ["derive"] }
 cgmath = "0.18.0"
 futures = "0.3.31"
 futures-intrusive = "0.5.0"
+itertools = "0.14.0"
 
 [dev-dependencies]
 insta = "1"
