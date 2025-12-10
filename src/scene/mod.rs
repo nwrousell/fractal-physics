@@ -6,6 +6,7 @@ mod vertex;
 
 use std::collections::HashSet;
 
+use cgmath::{InnerSpace, Vector3};
 use tessellate::Face;
 pub use vertex::Vertex;
 
@@ -76,11 +77,16 @@ impl Voxel {
     }
 }
 
+pub struct AABB {
+    pub min: Vector3<f32>,
+    pub max: Vector3<f32>,
+}
+
 pub struct Scene {
     pub vertices: Vec<Vertex>,
     pub object_collections: Vec<ObjectCollection>,
     pub lights: Lights,
-
+    pub obstacles: Vec<AABB>,
     pub player: Player,
 }
 
@@ -103,6 +109,8 @@ impl Scene {
         // Generate face instances for each face type
         let mut face_instances: [Vec<ObjectData>; 6] = Default::default();
 
+        let mut obstacles = Vec::new();
+
         for voxel in &voxels {
             let ctm = voxel.to_ctm();
             let color = voxel.color;
@@ -114,6 +122,25 @@ impl Scene {
                     face_instances[i].push(ObjectData::new(ctm, color));
                 }
             }
+            // let min = Vector3::new(
+            //     voxel.pos.x as f32,
+            //     voxel.pos.y as f32,
+            //     voxel.pos.z as f32,
+            // );
+            // print!("Voxel at {:?} width {:?} height {:?} depth {:?}\n", voxel.pos, voxel.width , voxel.height, voxel.depth);
+
+            // let max = min + Vector3::new(voxel.width, voxel.height, voxel.depth);
+            let vox_pos_f = Vector3::new(
+                voxel.pos.x as f32,
+                voxel.pos.y as f32,
+                voxel.pos.z as f32,
+            );
+
+            let min = vox_pos_f - Vector3::new(voxel.width / 2.0, voxel.height / 2.0, voxel.depth / 2.0);
+            let max = vox_pos_f + Vector3::new(voxel.width / 2.0, voxel.height / 2.0, voxel.depth / 2.0);
+
+
+            obstacles.push(AABB { min, max });
         }
 
         // Create object collections for each face type
@@ -130,7 +157,26 @@ impl Scene {
 
         // create player
         // TODO
-        let player = Player::new();
+        let mut player = Player::new(); 
+        // initial position
+        player.x = cgmath::Vector3::new(21.0, 1.0, 0.0);
+
+        player.ctm = cgmath::Matrix4::from(player.R)
+            * cgmath::Matrix4::from_translation(player.x);
+        
+        let player_mesh_start = vertices.len() as u32;
+        tessellate::tessellate_cube(&mut vertices, tessellation_param);
+        let player_mesh_count = vertices.len() as u32 - player_mesh_start;
+        let player_mesh = Mesh::new(player_mesh_start, player_mesh_count);
+
+        let player_color = [1.0, 0.2, 0.2, 1.0];
+        let player_instance = ObjectData::new(player.ctm, player_color);
+
+        object_collections.push(ObjectCollection::new(
+            Shape::Cube,
+            vec![player_instance],
+            player_mesh,
+        ));
 
         let lights = Lights::new(vec![LightUniform::new(
             [30.0, 30000.0, 50000.0],
@@ -142,6 +188,7 @@ impl Scene {
             vertices,
             lights,
             player,
+            obstacles
         }
     }
 
@@ -150,6 +197,74 @@ impl Scene {
             object_collection.init_buffer(device);
         }
         self.lights.init_buffer(device);
+        self.player.init_buffer(device);
+    }
+
+    pub fn handle_collisions(&mut self) {
+        let player = &mut self.player;
+
+
+        let mut most_collided: Option<(Vector3<f32>, f32, f32)> = None;
+
+        for cube in &self.obstacles {
+
+            let min = cube.min;
+            let max = cube.max;
+
+            let player_min = player.x - player.half_extents;
+            let player_max = player.x + player.half_extents;
+
+
+            let overlap_x = (player_max.x - min.x).min(max.x - player_min.x);
+            let overlap_y = (player_max.y - min.y).min(max.y - player_min.y);
+            let overlap_z = (player_max.z - min.z).min(max.z - player_min.z);
+
+
+            if overlap_x > 0.0 && overlap_y > 0.0 && overlap_z > 0.0 {
+
+                let (pen, normal, area) = if overlap_x <= overlap_y && overlap_x <= overlap_z {
+                    (overlap_x, Vector3::new(if player.x.x > (min.x + max.x) * 0.5 { 1.0 } else { -1.0 }, 0.0, 0.0), overlap_y * overlap_z)
+                } else if overlap_y <= overlap_z {
+                    (overlap_y, Vector3::new(0.0, if player.x.y > (min.y + max.y) * 0.5 { 1.0 } else { -1.0 }, 0.0), overlap_x * overlap_z)
+                } else {
+                    (overlap_z, Vector3::new(0.0, 0.0, if player.x.z > (min.z + max.z) * 0.5 { 1.0 } else { -1.0 }), overlap_x * overlap_y)
+                };
+
+                if most_collided.is_none() || pen > most_collided.unwrap().1 {
+                    most_collided = Some((normal, pen, area));
+                }
+            }
+        }
+
+
+        if let Some((normal, pen, _)) = most_collided {
+            let backoff = 0.5;
+
+            player.x += normal * pen;
+
+            let v_along_normal = player.v.dot(normal);
+            if v_along_normal < 0.0 {
+                player.v -= normal * v_along_normal * backoff;
+            }
+        }
+    }
+
+
+    pub fn update(&mut self, queue: &wgpu::Queue) {
+        self.player.update();
+
+        self.handle_collisions();
+
+        for object_collection in &mut self.object_collections {
+            if object_collection.shape == Shape::Cube {
+                if let Some(player_instance) = object_collection.object_data.get_mut(0) {
+                    player_instance.ctm = self.player.ctm.into();
+
+                    object_collection.write_buffer(queue);
+                }
+            }
+        }
+        // self.player.write_buffer(queue);
     }
 
     pub fn vertices(&self) -> &[u8] {

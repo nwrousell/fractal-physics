@@ -56,7 +56,7 @@ impl Camera {
         uniform.update_view_proj(&config);
         Self {
             config,
-            controller: CameraController::new(0.02),
+            controller: CameraController::new(1.0),
             bind_group: None,
             bind_group_layout: None,
             buffer: None,
@@ -271,19 +271,19 @@ impl CameraController {
 
     pub fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
         match code {
-            KeyCode::KeyW | KeyCode::ArrowUp => {
+            KeyCode::ArrowUp => {
                 self.is_forward_pressed = is_pressed;
                 true
             }
-            KeyCode::KeyA | KeyCode::ArrowLeft => {
+            KeyCode::ArrowLeft => {
                 self.is_left_pressed = is_pressed;
                 true
             }
-            KeyCode::KeyS | KeyCode::ArrowDown => {
+            KeyCode::ArrowDown => {
                 self.is_backward_pressed = is_pressed;
                 true
             }
-            KeyCode::KeyD | KeyCode::ArrowRight => {
+            KeyCode::ArrowRight => {
                 self.is_right_pressed = is_pressed;
                 true
             }
