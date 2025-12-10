@@ -79,8 +79,8 @@ impl Camera {
     pub fn update_to_player(&mut self, player: &crate::scene::player::Player) {
         use cgmath::{Vector3, Point3};
 
-        let behind = Vector3::new(0.0, 5.0, 7.0);
-        let up_offset = Vector3::new(0.0, 2.0, 0.0);
+        let behind = Vector3::new(0.0, 5.0, 10.0);
+        let up_offset = Vector3::new(0.0, 1.5, 0.0);
 
         let camera_offset = behind + up_offset;
         let rotated_offset = player.R * camera_offset; 
