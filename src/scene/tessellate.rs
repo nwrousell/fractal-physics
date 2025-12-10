@@ -58,6 +58,41 @@ impl Face {
         }
     }
 
+    fn face_points_prism(&self, width: f32, height: f32, depth: f32) -> (Point3<f32>, Point3<f32>, Point3<f32>) {
+        match self {
+            Face::Front => (
+                Point3::new(-width / 2.0, height / 2.0, depth / 2.0),  // Top left
+                Point3::new(width / 2.0, height / 2.0, depth / 2.0),   // Top right
+                Point3::new(-width / 2.0, -height / 2.0, depth / 2.0), // Bottom left
+            ),
+            Face::Top => (
+                Point3::new(width / 2.0, height / 2.0, depth / 2.0),   // Top right
+                Point3::new(-width / 2.0, height / 2.0, depth / 2.0),  // Top left
+                Point3::new(width / 2.0, height / 2.0, -depth / 2.0),  // Bottom right
+            ),
+            Face::Back => (
+                Point3::new(width / 2.0, height / 2.0, -depth / 2.0),  // Top right
+                Point3::new(-width / 2.0, height / 2.0, -depth / 2.0), // Top left
+                Point3::new(width / 2.0, -height / 2.0, -depth / 2.0),// Bottom right
+            ),
+            Face::Bottom => (
+                Point3::new(width / 2.0, -height / 2.0, -depth / 2.0), // Top right
+                Point3::new(-width / 2.0, -height / 2.0, -depth / 2.0),// Top left
+                Point3::new(width / 2.0, -height / 2.0, depth / 2.0),  // Bottom right
+            ),
+            Face::Right => (
+                Point3::new(width / 2.0, height / 2.0, depth / 2.0),   // Top right
+                Point3::new(width / 2.0, height / 2.0, -depth / 2.0),  // Top left
+                Point3::new(width / 2.0, -height / 2.0, depth / 2.0),  // Bottom right
+            ),
+            Face::Left => (
+                Point3::new(-width / 2.0, height / 2.0, -depth / 2.0), // Top left
+                Point3::new(-width / 2.0, height / 2.0, depth / 2.0),  // Top right
+                Point3::new(-width / 2.0, -height / 2.0, -depth / 2.0),// Bottom left
+            ),
+        }
+    }
+
     /// Tessellate this face into vertices
     pub fn tessellate(&self, vertices: &mut Vec<Vertex>, tessellation_param: u32) {
         let (top_left, top_right, bottom_left) = self.face_points();
@@ -69,6 +104,17 @@ impl Face {
             bottom_left,
         );
     }
+
+    // pub fn tessellate_prism(&self, vertices: &mut Vec<Vertex>, tessellation_param: u32) {
+    //     let (top_left, top_right, bottom_left) = self.face_points_prism(width, height, depth);
+    //     make_face(
+    //         vertices,
+    //         tessellation_param,
+    //         top_left,
+    //         top_right,
+    //         bottom_left,
+    //     );
+    // }
 }
 
 fn insert_vertex(vertices: &mut Vec<Vertex>, point: Point3<f32>, normal: Vector3<f32>) {
@@ -130,3 +176,9 @@ pub fn tessellate_cube(vertices: &mut Vec<Vertex>, tessellation_param: u32) {
         face.tessellate(vertices, tessellation_param);
     }
 }
+
+// pub fn tessellate_rectangular_prism(vertices: &mut Vec<Vertex>, tessellation_param: u32, width: f32, height: f32, depth: f32) {
+//     for face in Face::ALL {
+//         face.tessellate(vertices, tessellation_param, width, height, depth);
+//     }
+// }

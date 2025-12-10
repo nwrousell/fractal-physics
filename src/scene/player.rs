@@ -212,8 +212,8 @@ impl Player {
 
         // self.print_matrix(self.R);
 
-        self.ctm = Matrix4::from_translation(self.x) * Matrix4::from(self.R);
-        self.print_ctm();
+        self.ctm = Matrix4::from_translation(self.x) * Matrix4::from(self.R) * cgmath::Matrix4::from_nonuniform_scale(0.75, 0.5, 2.0);
+        // self.print_ctm();
         self.uniform.update(self.ctm);
         self.clear_forces();
     }
@@ -233,7 +233,7 @@ impl Player {
     pub fn update(&mut self) {
         // update pos/rot
         let torque_strength = 5.0;
-        let max_steering_angle = std::f32::consts::PI / 8.0; // max wheel turn angle (~22.5 degrees)
+        let max_steering_angle = std::f32::consts::PI / 6.0; // max wheel turn angle
         let steering_input = if self.is_key_pressed[&KeyCode::KeyA] {
             1.0 
         } else if self.is_key_pressed[&KeyCode::KeyD] {
@@ -246,11 +246,11 @@ impl Player {
 
         self.torque += Vector3::new(0.0, steering_torque, 0.0);
         if self.is_key_pressed[&KeyCode::KeyW] {
-            let forward_force = self.R * Vector3::new(0.0, 0.0, -20.0);
+            let forward_force = self.R * Vector3::new(0.0, 0.0, -7.0);
             self.apply_force(forward_force);
         } 
         if self.is_key_pressed[&KeyCode::KeyS] {
-            let backward_force = self.R * Vector3::new(0.0, 0.0, 20.0);
+            let backward_force = self.R * Vector3::new(0.0, 0.0, 7.0);
             self.apply_force(backward_force);
         }
 
@@ -352,7 +352,6 @@ impl Buffer for Player {
     // fn write_buffer(&self, queue: &wgpu::Queue) {
     fn write_buffer(&self, queue: &wgpu::Queue) {
 
-        print!("Writing player buffer\n");
         if let Some(buffer) = &self.buffer {
             queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[self.uniform]));
         } else {

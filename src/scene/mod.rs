@@ -91,6 +91,56 @@ pub struct Scene {
 }
 
 impl Scene {
+
+    // pub fn calculate_car_bounding_box(player: &Player) -> AABB {
+ 
+    //     let car_half_extents = cgmath::Vector3::new(0.75 / 2.0, 0.5 / 2.0, 2.0 / 2.0); 
+
+
+    //     let car_min = player.x - car_half_extents;
+    //     let car_max = player.x + car_half_extents;
+
+
+    //     AABB { min: car_min, max: car_max }
+    // }
+    pub fn calculate_car_bounding_box(player: &Player) -> AABB {
+        use cgmath::Transform;
+        let he = cgmath::Vector3::new(0.5, 0.5, 0.5); 
+
+        let corners = [
+            cgmath::vec3(-he.x, -he.y, -he.z),
+            cgmath::vec3( he.x, -he.y, -he.z),
+            cgmath::vec3(-he.x,  he.y, -he.z),
+            cgmath::vec3( he.x,  he.y, -he.z),
+            cgmath::vec3(-he.x, -he.y,  he.z),
+            cgmath::vec3( he.x, -he.y,  he.z),
+            cgmath::vec3(-he.x,  he.y,  he.z),
+            cgmath::vec3( he.x,  he.y,  he.z),
+        ];
+
+        let mut min = cgmath::vec3(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+        let mut max = cgmath::vec3(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+
+        for c in &corners {
+
+
+            let vec_to_pt3 = cgmath::Point3::new(c.x, c.y, c.z);
+            let world = player.ctm.transform_point(vec_to_pt3);
+
+            min.x = min.x.min(world.x);
+            min.y = min.y.min(world.y);
+            min.z = min.z.min(world.z);
+
+            max.x = max.x.max(world.x);
+            max.y = max.y.max(world.y);
+            max.z = max.z.max(world.z);
+        }
+
+        AABB { min, max }
+    }
+
+
+
     pub fn new(tessellation_param: u32, voxels: Vec<Voxel>) -> Self {
         let mut vertices = Vec::new();
 
@@ -161,8 +211,22 @@ impl Scene {
         // initial position
         player.x = cgmath::Vector3::new(21.0, 1.0, 0.0);
 
-        player.ctm = cgmath::Matrix4::from(player.R)
-            * cgmath::Matrix4::from_translation(player.x);
+        let width = 0.75; 
+        let height = 0.5; 
+        let depth = 2.0; 
+
+        // let scaling_matrix = cgmath::Matrix4::from_nonuniform_scale(width, height, depth);
+
+        // let scaled_ctm = player.ctm * scaling_matrix;
+
+        // player.ctm = scaling_matrix * cgmath::Matrix4::from(player.R)
+        //     * cgmath::Matrix4::from_translation(player.x);
+        player.ctm =
+            cgmath::Matrix4::from_translation(player.x) *
+            cgmath::Matrix4::from(player.R) *
+            cgmath::Matrix4::from_nonuniform_scale(width, height, depth);
+        
+        // Scene::create_car(&mut player, &mut vertices, tessellation_param as f32, &mut object_collections);
         
         let player_mesh_start = vertices.len() as u32;
         tessellate::tessellate_cube(&mut vertices, tessellation_param);
@@ -203,6 +267,7 @@ impl Scene {
     pub fn handle_collisions(&mut self) {
         let player = &mut self.player;
 
+        let car_bounding_box = Scene::calculate_car_bounding_box(player);
 
         let mut most_collided: Option<(Vector3<f32>, f32, f32)> = None;
 
@@ -211,8 +276,11 @@ impl Scene {
             let min = cube.min;
             let max = cube.max;
 
-            let player_min = player.x - player.half_extents;
-            let player_max = player.x + player.half_extents;
+            // let player_min = player.x - player.half_extents;
+            // let player_max = player.x + player.half_extents;
+
+            let player_min = car_bounding_box.min;
+            let player_max = car_bounding_box.max;
 
 
             let overlap_x = (player_max.x - min.x).min(max.x - player_min.x);
