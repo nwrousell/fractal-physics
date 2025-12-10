@@ -76,6 +76,23 @@ impl Camera {
         self.controller.handle_mouse_move(x, y);
     }
 
+    pub fn update_to_player(&mut self, player: &crate::scene::player::Player) {
+        use cgmath::{Vector3, Point3};
+
+        let behind = Vector3::new(0.0, 5.0, 7.0);
+        let up_offset = Vector3::new(0.0, 2.0, 0.0);
+
+        let camera_offset = behind + up_offset;
+        let rotated_offset = player.R * camera_offset; 
+
+        let new_eye = player.x + rotated_offset;
+        self.config.eye = Point3 { x: new_eye.x, y: new_eye.y, z: new_eye.z };
+
+        self.config.target = Point3 { x: player.x.x, y: player.x.y, z: player.x.z };
+
+        self.uniform.update_view_proj(&self.config);
+    }
+
     pub fn update(&mut self) {
         use cgmath::InnerSpace;
         let forward = self.config.target - self.config.eye;

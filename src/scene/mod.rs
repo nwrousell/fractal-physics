@@ -1,6 +1,6 @@
 mod lights;
 mod objects;
-mod player;
+pub(crate) mod player;
 mod tessellate;
 mod vertex;
 

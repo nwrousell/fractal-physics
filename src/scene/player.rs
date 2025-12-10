@@ -166,14 +166,24 @@ impl Player {
 
         self.compute_auxiliary();
 
-        // linear motion
-        let dv = (self.force / self.mass) * dt;
+        let friction_coefficient = 0.5;
+        let friction_force = -self.v * friction_coefficient;
+        let dv = (self.force + friction_force) / self.mass * dt;
         self.v += dv;
+        let angular_friction_coefficient = 0.1;
+
+        // linear motion
+        // let dv = (self.force / self.mass) * dt;
+        // self.v += dv;
         self.P = self.v * self.mass;
         self.x += self.v * dt;
 
         // angular motion
-        let domega = self.Iinv * self.torque * dt;
+        // let domega = self.Iinv * self.torque * dt;
+        // self.omega += domega;
+        // self.L = self.inertia * self.omega;
+        let angular_friction = -self.omega * angular_friction_coefficient;
+        let domega = self.Iinv * (self.torque + angular_friction) * dt;
         self.omega += domega;
         self.L = self.inertia * self.omega;
 
@@ -223,40 +233,69 @@ impl Player {
     pub fn update(&mut self) {
         // update pos/rot
         let torque_strength = 5.0;
-        if self.is_key_pressed[&KeyCode::KeyA] {
-            // self.apply_force_at_point(
-            //     Vector3::new(-5.0, 0.0, 0.0),
-            //     self.x + Vector3::new(0.5, 0.0, 0.0)
-            // );
-            // self.torque += self.R * Vector3::new(0.0, 1.0, 0.0) * torque_strength;
-            self.torque += Vector3::new(0.0, torque_strength, 0.0);
-        }
-        if self.is_key_pressed[&KeyCode::KeyD] {
-            // self.apply_force_at_point(
-            //     Vector3::new(5.0, 0.0, 0.0),
-            //     self.x + Vector3::new(-0.5, 0.0, 0.0)
-            // );
-            // self.torque += self.R * Vector3::new(0.0, 1.0, 0.0) * torque_strength;
-            self.torque += Vector3::new(0.0, -torque_strength, 0.0);
-        }
-        if self.is_key_pressed[&KeyCode::KeyA] || self.is_key_pressed[&KeyCode::KeyD] {
-            self.v = Vector3::new(0.0, 0.0, 0.0);
-            self.P = Vector3::new(0.0, 0.0, 0.0);
-        }
+        let max_steering_angle = std::f32::consts::PI / 8.0; // max wheel turn angle (~22.5 degrees)
+        let steering_input = if self.is_key_pressed[&KeyCode::KeyA] {
+            1.0 
+        } else if self.is_key_pressed[&KeyCode::KeyD] {
+            -1.0 
+        } else {
+            0.0
+        };
+
+        let steering_torque = max_steering_angle * steering_input;
+
+        self.torque += Vector3::new(0.0, steering_torque, 0.0);
         if self.is_key_pressed[&KeyCode::KeyW] {
-            let f = self.R * Vector3::new(0.0, 0.0, -20.0);
-            self.apply_force(f);
-            self.torque = Vector3::new(0.0, 0.0, 0.0);
-            self.omega  = Vector3::new(0.0, 0.0, 0.0);
-            self.L      = Vector3::new(0.0, 0.0, 0.0);
-        }
+            let forward_force = self.R * Vector3::new(0.0, 0.0, -20.0);
+            self.apply_force(forward_force);
+        } 
         if self.is_key_pressed[&KeyCode::KeyS] {
-            let f = self.R * Vector3::new(0.0, 0.0, 20.0);
-            self.apply_force(f);
-            self.torque = Vector3::new(0.0, 0.0, 0.0);
-            self.omega  = Vector3::new(0.0, 0.0, 0.0);
-            self.L      = Vector3::new(0.0, 0.0, 0.0);
+            let backward_force = self.R * Vector3::new(0.0, 0.0, 20.0);
+            self.apply_force(backward_force);
         }
+
+        if !self.is_key_pressed[&KeyCode::KeyW] && !self.is_key_pressed[&KeyCode::KeyS] {
+            self.v *= 0.98; 
+        }
+
+        if steering_input == 0.0 {
+            self.omega *= 0.98;
+        }
+        // basic physics controls 
+        // if self.is_key_pressed[&KeyCode::KeyA] {
+        //     // self.apply_force_at_point(
+        //     //     Vector3::new(-5.0, 0.0, 0.0),
+        //     //     self.x + Vector3::new(0.5, 0.0, 0.0)
+        //     // );
+        //     // self.torque += self.R * Vector3::new(0.0, 1.0, 0.0) * torque_strength;
+        //     self.torque += Vector3::new(0.0, torque_strength, 0.0);
+        // }
+        // if self.is_key_pressed[&KeyCode::KeyD] {
+        //     // self.apply_force_at_point(
+        //     //     Vector3::new(5.0, 0.0, 0.0),
+        //     //     self.x + Vector3::new(-0.5, 0.0, 0.0)
+        //     // );
+        //     // self.torque += self.R * Vector3::new(0.0, 1.0, 0.0) * torque_strength;
+        //     self.torque += Vector3::new(0.0, -torque_strength, 0.0);
+        // }
+        // if self.is_key_pressed[&KeyCode::KeyA] || self.is_key_pressed[&KeyCode::KeyD] {
+        //     self.v = Vector3::new(0.0, 0.0, 0.0);
+        //     self.P = Vector3::new(0.0, 0.0, 0.0);
+        // }
+        // if self.is_key_pressed[&KeyCode::KeyW] {
+        //     let f = self.R * Vector3::new(0.0, 0.0, -20.0);
+        //     self.apply_force(f);
+        //     self.torque = Vector3::new(0.0, 0.0, 0.0);
+        //     self.omega  = Vector3::new(0.0, 0.0, 0.0);
+        //     self.L      = Vector3::new(0.0, 0.0, 0.0);
+        // }
+        // if self.is_key_pressed[&KeyCode::KeyS] {
+        //     let f = self.R * Vector3::new(0.0, 0.0, 20.0);
+        //     self.apply_force(f);
+        //     self.torque = Vector3::new(0.0, 0.0, 0.0);
+        //     self.omega  = Vector3::new(0.0, 0.0, 0.0);
+        //     self.L      = Vector3::new(0.0, 0.0, 0.0);
+        // }
 
         self.simulate(1.0/64.0);
 

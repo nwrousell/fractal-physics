@@ -420,7 +420,8 @@ impl Game {
     }
 
     pub fn update(&mut self) {
-        self.camera.update();
+        // self.camera.update();
+        self.camera.update_to_player(&self.scene.player);
         self.camera.write_buffer(&self.queue);
         // this is going to be a tick -> adds to scene and then that adds the player
         self.scene.update(&self.queue); 
