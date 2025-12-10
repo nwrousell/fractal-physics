@@ -1,5 +1,6 @@
 mod lights;
 mod objects;
+mod player;
 mod tessellate;
 mod vertex;
 
@@ -14,6 +15,7 @@ use crate::{
     scene::{
         lights::{LightUniform, Lights},
         objects::{Mesh, ObjectCollection, ObjectData, Shape},
+        player::Player,
     },
 };
 
@@ -75,44 +77,12 @@ impl Voxel {
     }
 }
 
-#[derive(Debug)]
-pub struct RectangularPrism {
-    /// position of the center of the prism
-    pub position: Point3<f32>,
-    pub width: f32,
-    pub height: f32,
-    pub depth: f32,
-    pub color: [f32; 4],
-}
-
-impl RectangularPrism {
-    pub fn new(
-        position: Point3<f32>,
-        width: f32,
-        height: f32,
-        depth: f32,
-        color: [f32; 4],
-    ) -> Self {
-        RectangularPrism {
-            position,
-            width,
-            height,
-            depth,
-            color,
-        }
-    }
-
-    pub fn to_ctm(&self) -> cgmath::Matrix4<f32> {
-        let scale = cgmath::Matrix4::from_nonuniform_scale(self.width, self.height, self.depth);
-        let translation = cgmath::Matrix4::from_translation(self.position.to_vec());
-        translation * scale
-    }
-}
-
 pub struct Scene {
     pub vertices: Vec<Vertex>,
     pub object_collections: Vec<ObjectCollection>,
     pub lights: Lights,
+
+    pub player: Player,
 }
 
 impl Scene {
@@ -159,6 +129,10 @@ impl Scene {
             }
         }
 
+        // create player
+        // TODO
+        let player = Player::new();
+
         let lights = Lights::new(vec![LightUniform::new(
             [30.0, 30.0, 50000.0],
             [1.0, 1.0, 1.0],
@@ -168,6 +142,7 @@ impl Scene {
             object_collections,
             vertices,
             lights,
+            player,
         }
     }
 
