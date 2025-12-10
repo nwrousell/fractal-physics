@@ -59,6 +59,10 @@ enum Commands {
         /// Width/height of WFC wave (default: 10)
         #[arg(short, long, default_value = "10")]
         n: usize,
+
+        /// Make gif
+        #[arg(long, default_value_t = false)]
+        make_gif: bool,
     },
 }
 
@@ -83,8 +87,13 @@ fn main() -> Result<(), Error> {
         // } => {
         //     render_scene_to_file(&from, &path, width, height, !dont_postprocess)?;
         // }
-        Commands::Wfc { path, seed, n } => {
-            run_wfc(seed, n, &path)?;
+        Commands::Wfc {
+            path,
+            seed,
+            n,
+            make_gif,
+        } => {
+            run_wfc(seed, n, &path, make_gif)?;
         }
     }
 

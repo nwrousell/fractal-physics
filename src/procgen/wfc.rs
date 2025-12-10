@@ -439,7 +439,7 @@ impl WaveFunctionCollapse {
     }
 
     /// step until finished or in a contradictory state. Returns whether ran into a contradictory state
-    pub fn step_all(&mut self, show_progress: bool) -> bool {
+    pub fn step_all(&mut self, show_progress: bool, save_bitmaps: bool) -> (bool, Vec<Bitmap>) {
         let total = (self.wave.width * self.wave.height) as u64;
 
         let progress = if show_progress {
@@ -455,15 +455,20 @@ impl WaveFunctionCollapse {
             None
         };
 
+        let mut bitmaps = Vec::new();
+
         for _ in 0..total {
             if let Err(_) = self.step() {
                 if let Some(bar) = progress {
                     bar.finish_with_message("contradiction!");
                 }
-                return true;
+                return (true, bitmaps);
             }
             if let Some(ref bar) = progress {
                 bar.inc(1);
+            }
+            if save_bitmaps {
+                bitmaps.push(self.bitmap());
             }
         }
 
@@ -471,7 +476,7 @@ impl WaveFunctionCollapse {
             bar.finish_with_message("done");
         }
 
-        false
+        (false, bitmaps)
     }
 
     pub fn bitmap(&self) -> Bitmap {

@@ -17,13 +17,30 @@ mod procgen;
 mod scene;
 mod texture;
 
-pub fn run_wfc(seed: u64, n: usize, output_prefix: &str) -> anyhow::Result<()> {
+pub fn run_wfc(seed: u64, n: usize, output_prefix: &str, make_gif: bool) -> anyhow::Result<()> {
     let img_path = output_prefix.to_owned() + ".png";
     let world_path = output_prefix.to_owned() + ".json";
 
     let tileset = make_island_race_tileset();
     let mut wfc = WaveFunctionCollapse::new(tileset, n, n, seed);
-    wfc.step_all(true);
+    let (_, bitmaps) = wfc.step_all(true, make_gif);
+    if make_gif {
+        let gif_path = output_prefix.to_owned() + ".gif";
+        let gif_file = std::fs::File::create(&gif_path)?;
+        let mut encoder = image::codecs::gif::GifEncoder::new(gif_file);
+        encoder.set_repeat(image::codecs::gif::Repeat::Infinite)?;
+
+        let frames = bitmaps.iter().map(|b| {
+            let img = b.render_to_image();
+            let scaled = img.resize_exact(
+                img.width() * 10,
+                img.height() * 10,
+                image::imageops::FilterType::Nearest,
+            );
+            image::Frame::new(scaled.to_rgba8())
+        });
+        encoder.encode_frames(frames)?;
+    }
     let bitmap = wfc.bitmap();
     let img = bitmap.render_to_image();
     img.save(img_path)?;
@@ -61,7 +78,7 @@ pub fn run_interactive(
     } else {
         let tileset = make_island_race_tileset();
         let mut wfc = WaveFunctionCollapse::new(tileset, n, n, seed);
-        wfc.step_all(true);
+        wfc.step_all(true, false);
         let bitmap = wfc.bitmap();
         let height_map = bitmap.compute_height_map(seed);
         let world_def = WorldDefinition { bitmap, height_map };
